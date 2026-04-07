@@ -1,7 +1,7 @@
 {
-  "name": "hot-content-bot",
+  "name": "official-account-push",
   "version": "1.0.0",
-  "description": "热点内容自动化发布系统：爬取微博/抖音热点 → AI生成文章 → 智能配图 → 推送公众号 → 飞书通知",
+  "description": "热点内容自动化发布系统：爬取微博/抖音热点 → AI生成文章 → 推送公众号 → 飞书通知",
   "main": "src/main.js",
   "type": "module",
   "scripts": {

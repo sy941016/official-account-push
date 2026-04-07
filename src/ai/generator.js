@@ -1,11 +1,31 @@
 /**
  * AI 文章生成模块
- * 支持 Claude (Anthropic) / OpenAI GPT
+ * 支持 Claude (Anthropic) / OpenAI GPT / 豆包
  * 返回 { title, digest, contentHtml, keywords, imageQuery }
  */
+import axios from 'axios';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import axios from 'axios';
+
+// ===== AI 客户端单例（懒加载，兼容 Node 14）=====
+let _claudeClient = null;
+let _openaiClient = null;
+
+async function getClaudeClient() {
+  if (!_claudeClient) {
+    const { default: Anthropic } = await import('@anthropic-ai/sdk');
+    _claudeClient = new Anthropic({ apiKey: config.ai.anthropicKey });
+  }
+  return _claudeClient;
+}
+
+async function getOpenAIClient() {
+  if (!_openaiClient) {
+    const { default: OpenAI } = await import('openai');
+    _openaiClient = new OpenAI({ apiKey: config.ai.openaiKey });
+  }
+  return _openaiClient;
+}
 
 const PROMPT_TEMPLATE = (topic) => `
 你是一位资深的新媒体内容运营专家，擅长撰写微信公众号爆款文章。
@@ -70,15 +90,12 @@ async function generateWithClaude(prompt) {
     return null;
   }
   try {
-    const { default: Anthropic } = await import('@anthropic-ai/sdk');
-    const client = new Anthropic({ apiKey: config.ai.anthropicKey });
-
+    const client = await getClaudeClient();
     const msg = await client.messages.create({
       model: config.ai.claudeModel,
       max_tokens: 3000,
       messages: [{ role: 'user', content: prompt }],
     });
-
     return msg.content[0]?.text || null;
   } catch (err) {
     logger.error(`Claude生成失败: ${err.message}`);
@@ -93,9 +110,7 @@ async function generateWithOpenAI(prompt) {
     return null;
   }
   try {
-    const { default: OpenAI } = await import('openai');
-    const client = new OpenAI({ apiKey: config.ai.openaiKey });
-
+    const client = await getOpenAIClient();
     const res = await client.chat.completions.create({
       model: config.ai.openaiModel,
       messages: [
@@ -105,7 +120,6 @@ async function generateWithOpenAI(prompt) {
       max_tokens: 3000,
       temperature: 0.8,
     });
-
     return res.choices[0]?.message?.content || null;
   } catch (err) {
     logger.error(`OpenAI生成失败: ${err.message}`);
@@ -120,33 +134,28 @@ async function generateWithDoubao(prompt) {
     return null;
   }
   try {
-    logger.info(`豆包API请求: 模型=${config.ai.doubaoModel}, 端点=https://ark.cn-beijing.volces.com/api/v3/chat/completions`);
+    logger.info(`豆包API请求: 模型=${config.ai.doubaoModel}`);
     const response = await axios.post('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       model: config.ai.doubaoModel,
-      messages: [
-        {
-          role: 'user',
-          content: prompt
-        }
-      ],
+      messages: [{ role: 'user', content: prompt }],
       max_tokens: 3000,
-      temperature: 0.8
+      temperature: 0.8,
     }, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${config.ai.doubaoKey}`
+        'Authorization': `Bearer ${config.ai.doubaoKey}`,
       },
-      timeout: 600000 // 10分钟超时
+      timeout: 120000, // 2分钟
     });
 
-    const data = response.data;
-    logger.info(`豆包API响应: ${JSON.stringify(data, null, 2)}`);
-    return data.choices[0]?.message?.content || null;
+    const choice = response.data?.choices?.[0];
+    logger.info(`豆包API响应: finish_reason=${choice?.finish_reason}, usage=${JSON.stringify(response.data?.usage)}`);
+    return choice?.message?.content || null;
   } catch (err) {
     logger.error(`豆包生成失败: ${err.message}`);
     if (err.response) {
       logger.error(`响应状态: ${err.response.status}`);
-      logger.error(`响应数据: ${JSON.stringify(err.response.data, null, 2)}`);
+      logger.error(`响应数据: ${JSON.stringify(err.response.data)}`);
     }
     return null;
   }

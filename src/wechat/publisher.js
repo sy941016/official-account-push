@@ -12,6 +12,8 @@ const { apiBase, appId, appSecret } = config.wechat;
 
 // ===== AccessToken 管理（带文件缓存）=====
 let _tokenCache = null;
+// ===== 封面图 media_id 内存缓存 =====
+let _coverMediaIdCache = null;
 
 async function getAccessToken() {
   // 内存缓存
@@ -95,16 +97,21 @@ async function getMaterialList() {
 
 // ===== 获取一个有效的封面图media_id =====
 async function getCoverMediaId() {
+  // 内存缓存，避免每次创建草稿都请求素材库 API
+  if (_coverMediaIdCache) {
+    logger.info(`使用缓存的封面图media_id: ${_coverMediaIdCache}`);
+    return _coverMediaIdCache;
+  }
   const materials = await getMaterialList();
   if (!materials || materials.length === 0) {
     logger.error('无法获取封面图media_id，素材库中没有图片');
     return null;
   }
-  
   // 返回第一个图片的media_id
   const firstMaterial = materials[0];
-  logger.info(`使用素材库中的图片作为封面: ${firstMaterial.media_id}`);
-  return firstMaterial.media_id;
+  _coverMediaIdCache = firstMaterial.media_id;
+  logger.info(`使用素材库中的图片作为封面: ${_coverMediaIdCache}`);
+  return _coverMediaIdCache;
 }
 
 // ===== 创建草稿 =====
@@ -125,10 +132,7 @@ async function createDraft({ title, contentHtml, digest, thumbMediaId, author = 
   // 如果有有效的thumbMediaId，添加到article对象中
   if (thumbMediaId) {
     article.thumb_media_id = thumbMediaId;
-    logger.info(`使用封面图media_id: ${thumbMediaId}`);
   }
-  
-  logger.info(`发送到微信API的article对象: ${JSON.stringify(article)}`);
 
   try {
     const { data } = await axios.post(

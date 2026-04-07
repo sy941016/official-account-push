@@ -114,20 +114,20 @@ export async function sendStatusCard(stats, cid = chatId) {
       {
         tag: 'div',
         fields: [
-          { is_short: true, text: { tag: 'lark_md', content: `**今日发布**\n${stats.todayCount !== undefined && stats.todayCount !== null ? stats.todayCount : 0} 篇` } },
-          { is_short: true, text: { tag: 'lark_md', content: `**累计发布**\n${stats.totalCount !== undefined && stats.totalCount !== null ? stats.totalCount : 0} 篇` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**今日发布**\n${stats.todayCount ?? 0} 篇` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**累计发布**\n${stats.totalCount ?? 0} 篇` } },
         ],
       },
       {
         tag: 'div',
         fields: [
-          { is_short: true, text: { tag: 'lark_md', content: `**最后运行**\n${stats.lastRun !== undefined && stats.lastRun !== null ? stats.lastRun : '未运行'}` } },
-          { is_short: true, text: { tag: 'lark_md', content: `**下次运行**\n${stats.nextRun !== undefined && stats.nextRun !== null ? stats.nextRun : '未知'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**最后运行**\n${stats.lastRun ?? '未运行'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**下次运行**\n${stats.nextRun ?? '未知'}` } },
         ],
       },
       {
         tag: 'div',
-        text: { tag: 'lark_md', content: `**AI**: ${stats.aiProvider !== undefined && stats.aiProvider !== null ? stats.aiProvider : '-'} | **图片**: ${stats.imageProvider !== undefined && stats.imageProvider !== null ? stats.imageProvider : '-'} | **定时**: ${stats.cronSchedule !== undefined && stats.cronSchedule !== null ? stats.cronSchedule : '-'}` },
+        text: { tag: 'lark_md', content: `**AI**: ${stats.aiProvider ?? '-'} | **图片**: ${stats.imageProvider ?? '-'} | **定时**: ${stats.cronSchedule ?? '-'}` },
       },
     ],
   };

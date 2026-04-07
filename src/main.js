@@ -19,7 +19,11 @@
 import cron from 'node-cron';
 import config from '../config/index.js';
 import logger from './utils/logger.js';
-import { loadProcessed, saveProcessed } from './utils/cache.js';
+import { loadProcessed, saveProcessedBatch } from './utils/cache.js';
+import { generateArticle } from './ai/generator.js';
+import { publishToDraft } from './wechat/publisher.js';
+import * as feishu from './feishu/app.js';
+import { sleep } from './utils/helpers.js';
 
 // ===== 运行状态 =====
 const stats = {
@@ -71,6 +75,7 @@ export async function runPipeline(sources = ['weibo', 'douyin'], maxTopics = con
 
   // ── 步骤3：逐条处理 ─────────────────────────────────────
   let successCount = 0;
+  const processedIds = [];
   for (let i = 0; i < toProcess.length; i++) {
     const topic = toProcess[i];
     logger.info(`\n[${i + 1}/${toProcess.length}] ${topic.title}`);
@@ -79,7 +84,7 @@ export async function runPipeline(sources = ['weibo', 'douyin'], maxTopics = con
       const ok = await processTopic(topic);
       if (ok) {
         successCount++;
-        saveProcessed(topic.id);
+        processedIds.push(topic.id);
         stats.todayCount++;
         stats.totalCount++;
       }
@@ -94,6 +99,9 @@ export async function runPipeline(sources = ['weibo', 'douyin'], maxTopics = con
       await sleep(5000);
     }
   }
+
+  // 批量写入缓存，避免循环内多次读写
+  saveProcessedBatch(processedIds);
 
   logger.info(`\n✅ 完成：成功 ${successCount}/${toProcess.length} 篇`);
 }
@@ -117,10 +125,6 @@ async function fetchTopics(sources) {
 
 // ===== 单条处理 =====
 async function processTopic(topic) {
-  const { generateArticle } = await import('./ai/generator.js');
-  const { publishToDraft } = await import('./wechat/publisher.js');
-  const feishu = await import('./feishu/app.js');
-
   // 1. 生成文章
   logger.info('  📝 AI生成文章...');
   const article = await generateArticle(topic);
@@ -168,17 +172,13 @@ async function processTopic(topic) {
 // ===== 通知辅助 =====
 async function notifyNoNew() {
   if (!config.feishu.appId) return;
-  const { sendText } = await import('./feishu/app.js');
-  sendText('ℹ️ 本次检查：当前热点均已处理，无新内容生成。').catch(() => {});
+  feishu.sendText('ℹ️ 本次检查：当前热点均已处理，无新内容生成。').catch(() => {});
 }
 
 async function notifyError(msg, step) {
   if (!config.feishu.appId) return;
-  const { sendErrorAlert } = await import('./feishu/app.js');
-  sendErrorAlert(msg, step).catch(() => {});
+  feishu.sendErrorAlert(msg, step).catch(() => {});
 }
-
-const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ===== 定时任务 =====
 function startScheduler(sources, cronExpression) {
@@ -233,12 +233,13 @@ async function main() {
     case 'websocket': {
       // 定时任务在子线程跑（不阻塞主线程）
       startScheduler(sources, config.run.cronSchedule);
-      // TODO:立即执行一次
-      //await pipeline();
       // 主进程跑飞书WebSocket
       const ws = await import('./feishu/websocket.js');
       ws.init(pipeline, getStats);
-      await ws.startWebSocket();
+      // 启动 WebSocket，连接建立后立即执行一次流程
+      ws.startWebSocket().then(() => {
+        pipeline().catch(err => logger.error(`首次执行异常: ${err.message}`));
+      });
       break;
     }
 

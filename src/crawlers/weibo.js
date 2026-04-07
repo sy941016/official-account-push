@@ -95,7 +95,7 @@ async function fetchFromTenApi(topN) {
         summary: `微博热搜第${i + 1}位：${title}`,
         source: 'weibo',
       });
-    }).filter(t => t.title);
+    }).filter(t => t.title && !isAdTopic(t.title));
 
     logger.info(`微博第三方API：获取 ${results.length} 条`);
     return results;

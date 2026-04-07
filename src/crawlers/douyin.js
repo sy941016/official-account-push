@@ -6,6 +6,7 @@ import axios from 'axios';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
 import { topicId, formatHot } from '../utils/cache.js';
+import { sleep } from '../utils/helpers.js';
 
 const DOUYIN_HEADERS = {
   ...config.defaultHeaders,
@@ -131,4 +132,3 @@ function parseWordList(items, topN) {
   }).filter(Boolean);
 }
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));

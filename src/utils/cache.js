@@ -35,6 +35,19 @@ export function saveProcessed(id) {
 }
 
 /**
+ * 批量保存已处理话题ID（最多保留1000条）
+ * @param {string[]} newIds
+ */
+export function saveProcessedBatch(newIds) {
+  if (!newIds || newIds.length === 0) return;
+  mkdirSync(dirname(config.cacheFile), { recursive: true });
+  const set = loadProcessed();
+  for (const id of newIds) set.add(id);
+  const ids = [...set].slice(-1000);
+  writeFileSync(config.cacheFile, JSON.stringify({ ids }, null, 2), 'utf-8');
+}
+
+/**
  * 过滤关键词（广告词条）
  */
 const AD_KEYWORDS = ['广告', '限时', '折扣', '优惠券', '直播带货', '电商促销'];

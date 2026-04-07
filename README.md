@@ -5,7 +5,7 @@
 ## 📁 项目结构
 
 ```
-hot-content-bot/
+official-account-push/
 ├── config/
 │   └── index.js              # 统一配置（读取 .env）
 ├── src/
@@ -14,8 +14,6 @@ hot-content-bot/
 │   │   └── douyin.js         # 抖音热点爬虫（3级备用策略）
 │   ├── ai/
 │   │   └── generator.js      # AI文章生成（Claude / OpenAI）
-│   ├── image/
-│   │   └── selector.js       # 智能配图（Unsplash / Pexels / DALL-E 3）
 │   ├── wechat/
 │   │   └── publisher.js      # 公众号草稿箱推送
 │   ├── feishu/
@@ -27,7 +25,7 @@ hot-content-bot/
 │   │   └── cache.js          # 去重缓存、关键词提取、工具函数
 │   └── main.js               # 主入口（CLI参数 + 定时任务）
 ├── package.json
-└── .env.example
+└── .env
 ```
 
 ## 🚀 快速开始
@@ -37,7 +35,6 @@ hot-content-bot/
 npm install
 
 # 2. 配置环境变量
-cp .env.example .env
 # 编辑 .env，填入各平台 Key
 
 # 3. 运行
@@ -68,11 +65,6 @@ npm run scheduler    # 仅定时任务
 4. **WebSocket模式**：事件订阅 → 使用长连接 → 添加事件 `im.message.receive_v1`
 5. **HTTP模式**：事件订阅 → 填入 ngrok 地址
 
-### 图片服务（三选一）
-- **Unsplash**（推荐）：[unsplash.com/developers](https://unsplash.com/developers)
-- **Pexels**：[pexels.com/api](https://www.pexels.com/api/)
-- **DALL-E 3**：需要 OpenAI API Key
-
 ## 🤖 飞书机器人指令
 
 | 指令 | 效果 |
@@ -92,9 +84,7 @@ npm run scheduler    # 仅定时任务
     ↓
 AI生成文章（标题/摘要/正文HTML/图片搜索词）
     ↓
-智能配图（按提供商搜索+下载缓存）
-    ↓
-上传封面图 → 创建微信草稿
+默认封面图 → 创建微信草稿
     ↓
 飞书机器人发送消息卡片通知
 ```
