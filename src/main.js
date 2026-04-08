@@ -118,8 +118,13 @@ async function fetchTopics(sources) {
     tasks.push(getDouyinHot(20).catch(err => { logger.error(`抖音爬取异常: ${err.message}`); return []; }));
   }
   const results = (await Promise.all(tasks)).flat();
-  // 按热度降序
-  results.sort((a, b) => (b.hotValue || 0) - (a.hotValue || 0));
+  // 按 viralScore 降序（跨平台爆点评分），兜底用 hotValue
+  results.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0) || (b.hotValue || 0) - (a.hotValue || 0));
+  // 打印 Top5 爆点预览
+  const top5 = results.slice(0, 5).map((t, i) =>
+    `  #${i + 1} [${t.source}]${t.viralLabel ? `【${t.viralLabel}】` : ''} ${t.title} (score:${t.viralScore || 0})`
+  ).join('\n');
+  logger.info(`爆点 Top5 预览:\n${top5}`);
   return results;
 }
 

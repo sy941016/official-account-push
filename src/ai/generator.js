@@ -27,33 +27,66 @@ async function getOpenAIClient() {
   return _openaiClient;
 }
 
+// ===== 系统人设提示词（所有模型通用）=====
+const SYSTEM_PROMPT = `你是一位拥有10年经验的微信公众号爆款内容创作专家，曾操盘多个百万粉丝账号。
+你深刻理解中国新媒体读者的心理，擅长用情绪化叙事、悬念设置、共情表达抓住读者注意力。
+你的文章总能引发大量转发和评论，因为你懂得在信息量与可读性之间找到完美平衡。`;
+
+// ===== 核心 Prompt 模板 =====
 const PROMPT_TEMPLATE = (topic) => `
-你是一位资深的新媒体内容运营专家，擅长撰写微信公众号爆款文章。
+请根据以下热点话题，创作一篇高质量的微信公众号爆款文章。
 
-请根据以下热点话题，写一篇高质量的公众号文章：
+【话题信息】
+标题：${topic.title}
+背景：${topic.summary}
+来源：${topic.source === 'weibo' ? '微博热搜' : '抖音热点'}（热度排名第${topic.rank}位）
 
-话题标题：${topic.title}
-话题背景：${topic.summary}
-话题来源：${topic.source === 'weibo' ? '微博热搜' : '抖音热点'}（热度排名第${topic.rank}位）
+【写作要求】
 
-写作要求：
-1. 标题：在原话题基础上优化，增加吸引力，不超过25个字
-2. 正文字数：1200-1800字
-3. 文章结构：引言 → 背景介绍 → 深度分析 → 多角度观点 → 总结展望
-4. 语言风格：通俗易懂，有洞察力，有温度，避免说教
-5. 适度加入数据/案例增强可信度
-6. 结尾引导读者思考或互动
+一、标题（必须满足以下至少3条）
+- 不超过25个字
+- 制造好奇心或悬念（如：没想到、竟然、真相是）
+- 或者引发情感共鸣（触动、扎心、破防）
+- 或者提供明确价值（干货、必看、深度）
+- 禁止使用夸大不实的标题党
+
+二、正文结构（1500-2200字）
+1. 开篇钩子（100-150字）：用一个强烈的场景、反差或灵魂拷问开篇，让读者立刻停止划走
+2. 事件背景（200-300字）：简洁交代来龙去脉，配合数据/时间线增强真实感
+3. 深度拆解（500-700字）：至少从2个不同角度深度分析，提出独到见解，非人云亦云
+4. 真实案例或数据（200-300字）：引用具体数字、真实案例或权威观点佐证论点
+5. 读者共鸣层（200-300字）：将话题与普通人的日常生活/情感连接，引发"这说的就是我"的共鸣
+6. 结尾互动（100-150字）：留下开放性问题或行动号召，引导评论和转发
+
+三、语言风格
+- 口语化、有温度，像朋友聊天不像论文
+- 适当使用短句和独立成段制造节奏感
+- 关键观点用加粗或引用块突出
+- 禁止：说教式口吻、大量专业术语堆砌、空洞的正确废话
+
+四、HTML排版（微信公众号专用，必须使用内联样式）
+- 段落：<p style="margin: 16px 0; line-height: 1.8; font-size: 16px; color: #333;">
+- 小标题：<h2 style="font-size: 20px; font-weight: bold; color: #1a1a1a; margin: 28px 0 12px; border-left: 4px solid #07C160; padding-left: 12px;">
+- 重点词：<strong style="color: #e04040;">
+- 金句引用：<blockquote style="border-left: 3px solid #07C160; margin: 20px 0; padding: 12px 16px; background: #f9f9f9; color: #555; font-style: italic;">
+- 数据高亮：<span style="color: #07C160; font-weight: bold;">
 
 请以 JSON 格式输出，字段如下：
 {
-  "title": "优化后的文章标题",
-  "digest": "文章摘要，50-100字，用于公众号摘要显示",
-  "contentHtml": "文章正文HTML，使用<h2><p><strong><em><blockquote>等标签排版",
-  "keywords": ["关键词1", "关键词2", "关键词3"],
-  "imageQuery": "用于搜索配图的英文关键词（2-4个词）"
+  "title": "优化后的爆款标题（不超过25字）",
+  "digest": "文章摘要，60-100字，突出亮点，吸引点击，用于公众号摘要显示",
+  "contentHtml": "完整文章正文HTML，必须使用上述内联样式规范",
+  "keywords": ["核心关键词1", "关键词2", "关键词3"],
+  "imageQuery": "用于搜索配图的英文关键词，2-4个词，偏向具体场景而非抽象概念"
 }
 
 只输出 JSON，不要有任何其他内容。
+`.trim();
+
+// ===== 文章尾部固定内容 =====
+const ARTICLE_FOOTER = `
+<p style="margin: 40px 0 8px; text-align: center; color: #999; font-size: 14px;">— END —</p>
+<p style="margin: 8px 0 24px; text-align: center; color: #999; font-size: 13px;">觉得有用？点个<strong style="color: #e04040;">在看</strong>支持一下 👇</p>
 `.trim();
 
 /**
@@ -93,7 +126,9 @@ async function generateWithClaude(prompt) {
     const client = await getClaudeClient();
     const msg = await client.messages.create({
       model: config.ai.claudeModel,
-      max_tokens: 3000,
+      max_tokens: 4096,
+      temperature: 0.85,
+      system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: prompt }],
     });
     return msg.content[0]?.text || null;
@@ -114,11 +149,11 @@ async function generateWithOpenAI(prompt) {
     const res = await client.chat.completions.create({
       model: config.ai.openaiModel,
       messages: [
-        { role: 'system', content: '你是专业的新媒体内容创作者，擅长写微信公众号文章。' },
+        { role: 'system', content: SYSTEM_PROMPT },
         { role: 'user', content: prompt },
       ],
-      max_tokens: 3000,
-      temperature: 0.8,
+      max_tokens: 4096,
+      temperature: 0.85,
     });
     return res.choices[0]?.message?.content || null;
   } catch (err) {
@@ -137,15 +172,18 @@ async function generateWithDoubao(prompt) {
     logger.info(`豆包API请求: 模型=${config.ai.doubaoModel}`);
     const response = await axios.post('https://ark.cn-beijing.volces.com/api/v3/chat/completions', {
       model: config.ai.doubaoModel,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 3000,
-      temperature: 0.8,
+      messages: [
+        { role: 'system', content: SYSTEM_PROMPT },
+        { role: 'user', content: prompt },
+      ],
+      max_tokens: 4096,
+      temperature: 0.85,
     }, {
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${config.ai.doubaoKey}`,
       },
-      timeout: 120000, // 2分钟
+      timeout: 600000, // 10分钟
     });
 
     const choice = response.data?.choices?.[0];
@@ -175,16 +213,48 @@ function parseResponse(raw) {
         return null;
       }
     }
-    // 确保 contentHtml 有标签
-    if (!data.contentHtml.startsWith('<')) {
-      data.contentHtml = `<p>${data.contentHtml}</p>`;
-    }
-    logger.info(`文章生成成功：${data.title}`);
-    return data;
+    return postProcess(data);
   } catch (err) {
     logger.warn(`JSON解析失败，尝试容错解析: ${err.message}`);
     return fallbackParse(raw);
   }
+}
+
+/**
+ * 文章后处理：质量校验 + 统一注入尾部内容
+ */
+function postProcess(data) {
+  // 确保 contentHtml 有标签
+  if (!data.contentHtml.startsWith('<')) {
+    data.contentHtml = `<p style="margin:16px 0;line-height:1.8;font-size:16px;color:#333;">${data.contentHtml}</p>`;
+  }
+
+  // 注入统一尾部（避免重复注入）
+  if (!data.contentHtml.includes('— END —')) {
+    data.contentHtml = data.contentHtml + '\n' + ARTICLE_FOOTER;
+  }
+
+  // 标题长度校验
+  if (data.title.length > 25) {
+    logger.warn(`标题超长(${data.title.length}字)，已截断: ${data.title}`);
+    data.title = data.title.slice(0, 25);
+  }
+
+  // 正文字数估算（去除 HTML 标签后）
+  const textContent = data.contentHtml.replace(/<[^>]+>/g, '');
+  const charCount = textContent.replace(/\s/g, '').length;
+  if (charCount < 800) {
+    logger.warn(`文章正文字数偏少(约${charCount}字)，质量可能不足`);
+  } else {
+    logger.info(`文章生成成功：${data.title}（约${charCount}字）`);
+  }
+
+  // 确保 keywords 是数组
+  if (!Array.isArray(data.keywords)) {
+    data.keywords = [];
+  }
+
+  return data;
 }
 
 function fallbackParse(raw) {
@@ -193,8 +263,9 @@ function fallbackParse(raw) {
   const title = titleMatch?.[1] || '热点文章';
   const digest = digestMatch?.[1] || '精彩内容等你来看';
   const paragraphs = raw.split('\n').filter(l => l.trim().length > 20).slice(0, 10);
-  let contentHtml = paragraphs.map(p => `<p>${p.trim()}</p>`).join('') || '<p>内容生成中...</p>';
-  // 添加固定作者信息
-  contentHtml += '<p style="text-align: right; margin-top: 20px;">作者：可达鸭</p>';
+  let contentHtml = paragraphs
+    .map(p => `<p style="margin:16px 0;line-height:1.8;font-size:16px;color:#333;">${p.trim()}</p>`)
+    .join('') || '<p style="margin:16px 0;line-height:1.8;font-size:16px;color:#333;">内容生成中...</p>';
+  contentHtml += '\n' + ARTICLE_FOOTER;
   return { title, digest, contentHtml, keywords: [], imageQuery: 'news trending' };
 }

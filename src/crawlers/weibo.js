@@ -1,12 +1,16 @@
 /**
  * 微博热搜爬虫
  * 策略：官方Ajax API → 第三方公开接口备用 → 网页解析兜底
+ *
+ * 爆点识别：
+ *   - 提取微博官方标签：爆(×3.0) / 沸(×2.5) / 热(×1.5) / 新(×1.3)
+ *   - 每条输出 viralScore（跨平台可比），供主流程排序
  */
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import { topicId, isAdTopic } from '../utils/cache.js';
+import { topicId, isAdTopic, computeViralScore } from '../utils/cache.js';
 
 const BASE_HEADERS = {
   ...config.defaultHeaders,
@@ -34,6 +38,11 @@ export async function getWeiboHot(topN = 30) {
   return topics;
 }
 
+// 微博爆点标签（非广告标签）
+const WEIBO_VIRAL_LABELS = new Set(['爆', '沸', '热', '新', '荐']);
+// 需要跳过的商业标签
+const WEIBO_AD_LABELS = new Set(['广告', '商业热点', '电视剧', '综艺', '电影']);
+
 async function fetchFromOfficialApi(topN) {
   try {
     const headers = { ...BASE_HEADERS };
@@ -52,23 +61,40 @@ async function fetchFromOfficialApi(topN) {
 
     for (const item of items) {
       if (rank >= topN) break;
-      if (['广告', '商业热点'].includes(item.label_name)) continue;
+      if (WEIBO_AD_LABELS.has(item.label_name)) continue;
 
       const title = stripHtml(item.word || '');
       if (!title || isAdTopic(title)) continue;
 
       rank++;
+
+      // 提取爆点标签：label_name / icon_desc / flag
+      const rawLabel = item.label_name || item.icon_desc || '';
+      const viralLabel = WEIBO_VIRAL_LABELS.has(rawLabel) ? rawLabel : '';
+
+      const hotValue = item.num || item.raw_hot || 0;
+      const viralScore = computeViralScore(rank, topN, hotValue, viralLabel);
+
+      // 构造更丰富的摘要
+      const labelTag = viralLabel ? `【${viralLabel}】` : '';
+      const noteText = item.note ? item.note.replace(/<[^>]+>/g, '').trim() : '';
+      const summary = noteText
+        ? `${labelTag}${noteText}`
+        : `${labelTag}微博热搜第${rank}位：${title}（热度${formatHotShort(hotValue)}）`;
+
       results.push(normalize({
         title,
-        hotValue: item.num || 0,
+        hotValue,
+        viralScore,
+        viralLabel,
         rank,
         category: item.category || '社会',
-        summary: item.note || `微博热搜第${rank}位：${title}`,
+        summary,
         source: 'weibo',
       }));
     }
 
-    logger.info(`微博官方API：获取 ${results.length} 条`);
+    logger.info(`微博官方API：获取 ${results.length} 条（含爆点标签）`);
     return results;
   } catch (err) {
     logger.warn(`微博官方API失败: ${err.message}`);
@@ -87,15 +113,21 @@ async function fetchFromTenApi(topN) {
     const items = Array.isArray(data?.data) ? data.data : [];
     const results = items.slice(0, topN).map((item, i) => {
       const title = item.name || item.title || '';
+      if (!title || isAdTopic(title)) return null;
+      const rank = i + 1;
+      const hotValue = parseInt(item.hot || '0', 10) || 0;
+      const viralScore = computeViralScore(rank, topN, hotValue, '');
       return normalize({
         title,
-        hotValue: parseInt(item.hot || '0', 10) || 0,
-        rank: i + 1,
+        hotValue,
+        viralScore,
+        viralLabel: '',
+        rank,
         category: '社会',
-        summary: `微博热搜第${i + 1}位：${title}`,
+        summary: `微博热搜第${rank}位：${title}（热度${formatHotShort(hotValue)}）`,
         source: 'weibo',
       });
-    }).filter(t => t.title && !isAdTopic(t.title));
+    }).filter(Boolean);
 
     logger.info(`微博第三方API：获取 ${results.length} 条`);
     return results;
@@ -124,9 +156,12 @@ async function fetchFromWebpage(topN) {
       const title = $(el).text().trim();
       if (!title || isAdTopic(title)) return;
       rank++;
+      const viralScore = computeViralScore(rank, topN, 0, '');
       results.push(normalize({
         title,
         hotValue: 0,
+        viralScore,
+        viralLabel: '',
         rank,
         category: '社会',
         summary: `微博热搜第${rank}位：${title}`,
@@ -142,16 +177,26 @@ async function fetchFromWebpage(topN) {
   }
 }
 
-function normalize({ title, hotValue, rank, category, summary, source }) {
+function normalize({ title, hotValue, viralScore = 0, viralLabel = '', rank, category, summary, source }) {
   return {
     id: topicId(title),
     title,
     hotValue,
+    viralScore,
+    viralLabel,
     rank,
     category,
     summary,
     source,
   };
+}
+
+/** 格式化热度为短文本（用于 summary） */
+function formatHotShort(value) {
+  if (!value) return '未知';
+  if (value >= 1e8) return `${(value / 1e8).toFixed(1)}亿`;
+  if (value >= 1e4) return `${(value / 1e4).toFixed(0)}万`;
+  return String(value);
 }
 
 function stripHtml(str) {

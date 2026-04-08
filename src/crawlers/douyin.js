@@ -1,11 +1,15 @@
 /**
  * 抖音热点爬虫
  * 策略：Web API → 移动端API → 第三方公开接口备用
+ *
+ * 爆点识别：
+ *   - label_type: 1=普通 / 2=直播 / 3=挑战赛 / 4=新晋(×1.3) / 5=爆发(×3.0)
+ *   - 每条输出 viralScore（跨平台可比），供主流程排序
  */
 import axios from 'axios';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import { topicId, formatHot } from '../utils/cache.js';
+import { topicId, formatHot, isAdTopic, computeViralScore } from '../utils/cache.js';
 import { sleep } from '../utils/helpers.js';
 
 const DOUYIN_HEADERS = {
@@ -14,6 +18,20 @@ const DOUYIN_HEADERS = {
   Origin: 'https://www.douyin.com',
   Accept: 'application/json, text/plain, */*',
 };
+
+/**
+ * 抖音 label_type → 爆点标签名
+ * 参考抖音 API 实测：4=新晋上升 5=热门爆发
+ */
+const DOUYIN_LABEL_MAP = {
+  4: '新',   // 新晋榜单
+  5: '爆',   // 爆发式增长
+  2: '热',   // 直播/热门
+};
+
+function douyinLabelName(labelType) {
+  return DOUYIN_LABEL_MAP[labelType] || '';
+}
 
 /**
  * 爬取抖音热点
@@ -92,18 +110,23 @@ async function fetchFromTenApi(topN) {
     const items = Array.isArray(data?.data) ? data.data : [];
     const results = items.slice(0, topN).map((item, i) => {
       const title = item.name || item.title || '';
+      if (!title || isAdTopic(title)) return null;
+      const rank = i + 1;
       const hotValue = parseInt(item.hot || '0', 10) || 0;
+      const viralScore = computeViralScore(rank, topN, hotValue, '');
       return {
         id: topicId(title),
         title,
         hotValue,
         hotDisplay: formatHot(hotValue),
-        rank: i + 1,
+        viralScore,
+        viralLabel: '',
+        rank,
         category: '抖音热点',
-        summary: `抖音热点第${i + 1}位：${title}（${formatHot(hotValue)}次讨论）`,
+        summary: `抖音热搜第${rank}位：${title}（${formatHot(hotValue)}次讨论）`,
         source: 'douyin',
       };
-    }).filter(t => t.title);
+    }).filter(Boolean);
 
     logger.info(`抖音第三方API：获取 ${results.length} 条`);
     return results;
@@ -114,19 +137,33 @@ async function fetchFromTenApi(topN) {
 }
 
 function parseWordList(items, topN) {
+  const total = Math.min(items.length, topN);
   return items.slice(0, topN).map((item, i) => {
     const wordItem = item.word_item || item;
     const title = (wordItem.word || '').replace(/<[^>]+>/g, '').trim();
-    if (!title) return null;
+    if (!title || isAdTopic(title)) return null;
+
+    const rank = i + 1;
     const hotValue = wordItem.hot_value || 0;
+
+    // 提取标签类型（label_type）→ 爆点标签名
+    const labelType = wordItem.label_type || item.label_type || 0;
+    const viralLabel = douyinLabelName(labelType);
+    const viralScore = computeViralScore(rank, total, hotValue, viralLabel);
+
+    const labelTag = viralLabel ? `【${viralLabel}】` : '';
+    const summary = `${labelTag}抖音热搜第${rank}位：${title}（${formatHot(hotValue)}次讨论）`;
+
     return {
       id: topicId(title),
       title,
       hotValue,
       hotDisplay: formatHot(hotValue),
-      rank: i + 1,
+      viralScore,
+      viralLabel,
+      rank,
       category: '抖音热点',
-      summary: `抖音热点第${i + 1}位：${title}（${formatHot(hotValue)}次讨论）`,
+      summary,
       source: 'douyin',
     };
   }).filter(Boolean);

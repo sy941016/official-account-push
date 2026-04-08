@@ -48,12 +48,57 @@ export function saveProcessedBatch(newIds) {
 }
 
 /**
- * 过滤关键词（广告词条）
+ * 过滤关键词（广告词条 / 低价值内容）
  */
-const AD_KEYWORDS = ['广告', '限时', '折扣', '优惠券', '直播带货', '电商促销'];
+const AD_KEYWORDS = [
+  // 商业广告
+  '广告', '限时', '折扣', '优惠券', '直播带货', '电商促销',
+  '拼多多', '淘宝', '京东秒杀', '品牌推广', '种草',
+  // 低价值娱乐
+  '占卜', '星座运势', '求签', '转发锦鲤', '抽奖福利',
+  // 明显营销
+  '带货', '下单', '扫码', '领红包', '免费领取',
+];
 
 export function isAdTopic(title) {
   return AD_KEYWORDS.some((kw) => title.includes(kw));
+}
+
+/**
+ * 爆点标签 → 权重乘数
+ * 微博标签：爆/沸/热/新/荐
+ * 抖音标签：爆/热/新
+ */
+const LABEL_MULTIPLIER = {
+  '爆': 3.0,  // 全网引爆
+  '沸': 2.5,  // 微博极热
+  '热': 1.5,  // 正在升温
+  '新': 1.3,  // 新晋上榜
+  '荐': 1.1,  // 官方推荐
+};
+
+export function getLabelMultiplier(labelName = '') {
+  return LABEL_MULTIPLIER[labelName] || 1.0;
+}
+
+/**
+ * 计算跨平台爆点得分
+ * 基于排名归一化 + 热度对数补偿 + 标签加权
+ * 确保不同平台（微博/抖音）可以公平比较
+ *
+ * @param {number} rank        排名（1 最热）
+ * @param {number} topN        该平台总数
+ * @param {number} hotValue    平台原始热度值
+ * @param {string} labelName   爆点标签（爆/沸/热/新）
+ * @returns {number}
+ */
+export function computeViralScore(rank, topN, hotValue = 0, labelName = '') {
+  // 排名得分：第1名=100，最后=~3（归一化，跨平台公平）
+  const rankScore = ((topN - rank + 1) / topN) * 100;
+  // 热度补偿：对数压缩，限制在 0~30，避免平台数量级差异主导
+  const hotBonus = hotValue > 0 ? Math.min(30, Math.log10(hotValue + 1) * 5) : 0;
+  const multiplier = getLabelMultiplier(labelName);
+  return Math.round((rankScore + hotBonus) * multiplier);
 }
 
 /**
