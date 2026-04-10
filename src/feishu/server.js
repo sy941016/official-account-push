@@ -122,12 +122,34 @@ async function handleMessageEvent(event) {
       }
     } else if (cmd === 'STATUS') {
       await sendStatusCard(_getStats ? _getStats() : {}, chatId);
+    } else if (cmd === 'STYLE_JAYCHOU') {
+      config.articleStyle.style = 'jaychou';
+      await sendText('✅ 已切换生成模式为: 🎵 周杰伦歌曲\n\n下次生成的文章将使用新模式。', chatId);
+    } else if (cmd === 'STYLE_DEFAULT') {
+      config.articleStyle.style = 'default';
+      await sendText('✅ 已切换生成模式为: 📰 默认模式\n\n下次生成的文章将使用新模式。', chatId);
+    } else if (cmd === 'MODE') {
+      const currentStyle = config.articleStyle?.style || 'default';
+      const styleName = currentStyle === 'jaychou' ? '🎵 周杰伦歌曲' : '📰 默认模式';
+      await sendText(
+        `📝 当前生成模式: ${styleName}\n\n` +
+        '切换方式:\n' +
+        '• 1 — 切换为 🎵 周杰伦歌曲\n' +
+        '• 2 — 切换为 📰 默认模式',
+        chatId
+      );
     } else if (cmd === 'HELP') {
+      const style = config.articleStyle?.style || 'default';
+      const styleName = style === 'jaychou' ? '🎵 周杰伦歌曲' : '📰 默认模式';
       await sendText(
         '🤖 热点内容机器人指令：\n\n' +
         '• /hot 或 抓取热点 — 立即爬取热点并生成文章\n' +
         '• /status 或 状态 — 查看系统运行状态\n' +
+        '• /mode 或 模式 — 查看当前生成模式\n' +
+        '• 1 — 切换为 🎵 周杰伦歌曲\n' +
+        '• 2 — 切换为 📰 默认模式\n' +
         '• /help — 显示帮助\n\n' +
+        `📝 当前生成模式: ${styleName}\n` +
         '系统按配置的 Cron 表达式自动运行。',
         chatId
       );

@@ -63,9 +63,11 @@ export const sendText = (text, cid = chatId) =>
   sendMessage(cid, 'text', { text });
 
 // ===== 文章发布通知卡片 =====
-export async function sendArticleCard({ topicTitle, articleTitle, digest, source, rank, draftId }, cid = chatId) {
+export async function sendArticleCard({ topicTitle, articleTitle, digest, source, rank, draftId, style }, cid = chatId) {
   const sourceEmoji = source === 'weibo' ? '🔥' : '🎵';
   const sourceName = source === 'weibo' ? '微博热搜' : '抖音热点';
+  const styleEmoji = style === 'jaychou' ? '🎵' : '📰';
+  const styleName = style === 'jaychou' ? '周杰伦歌曲' : '默认风格';
 
   const card = {
     config: { wide_screen_mode: true },
@@ -89,14 +91,15 @@ export async function sendArticleCard({ topicTitle, articleTitle, digest, source
         tag: 'div',
         fields: [
           { is_short: true, text: { tag: 'lark_md', content: `**草稿ID**\n\`${draftId || '生成中...'}\`` } },
-          { is_short: true, text: { tag: 'lark_md', content: `**状态**\n${draftId ? '✅ 推送成功' : '⚠️ 推送失败'}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**文章风格**\n${styleEmoji} ${styleName}` } },
         ],
       },
       {
         tag: 'action',
         actions: [
           { tag: 'button', text: { tag: 'plain_text', content: '前往公众号草稿箱' }, type: 'primary', url: 'https://mp.weixin.qq.com' },
-          { tag: 'button', text: { tag: 'plain_text', content: '立即抓取新热点' }, type: 'default', value: { action: 'fetch_hot' } },
+          { tag: 'button', text: { tag: 'plain_text', content: '用默认模式推送' }, type: 'default', value: { action: 'fetch_hot' } },
+          { tag: 'button', text: { tag: 'plain_text', content: '🎵 用周杰伦歌曲推送' }, type: 'default', value: { action: 'fetch_jaychou' } },
         ],
       },
     ],
@@ -149,15 +152,22 @@ export async function sendErrorAlert(errorMsg, step, cid = chatId) {
 // ===== 指令解析 =====
 export function parseCommand(text) {
   const t = (text || '').trim().toLowerCase();
-  
-  // 热点抓取
-  if (['/hot', '抓取热点', '热点'].some(cmd => t.includes(cmd))) return 'FETCH_HOT';
-  
+
+  // 推送文章（根据当前模式）
+  if (['/push', '推送文章'].some(cmd => t.includes(cmd))) return 'FETCH_HOT';
+
   // 状态查询
   if (['/status', '状态', '/stat'].some(cmd => t.includes(cmd))) return 'STATUS';
-  
+
+  // 模式指令（显示当前模式）
+  if (['/mode', '模式'].some(cmd => t.includes(cmd))) return 'MODE';
+
+  // 数字切换模式指令
+  if (t === '1') return 'MODE_1';
+  if (t === '2') return 'MODE_2';
+
   // 帮助信息
   if (['/help', '帮助', '？', '?', 'help'].some(cmd => t.includes(cmd))) return 'HELP';
-  
+
   return 'UNKNOWN';
 }

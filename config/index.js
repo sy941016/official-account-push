@@ -54,6 +54,12 @@ export const config = {
     logLevel: process.env.LOG_LEVEL || 'info',
   },
 
+  // 文章生成风格配置
+  articleStyle: {
+    // 可选风格: 'default' | 'jaychou'
+    style: process.env.ARTICLE_STYLE || 'default',
+  },
+
   // 通用请求头
   defaultHeaders: {
     'User-Agent':

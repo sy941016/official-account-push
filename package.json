@@ -16,7 +16,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
-    "@larksuiteoapi/node-sdk": "1.1.0",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "axios": "^1.7.0",
     "cheerio": "1.0.0-rc.12",
     "dotenv": "^16.4.0",

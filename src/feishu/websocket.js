@@ -13,10 +13,14 @@ import { sendText, sendStatusCard, sendErrorAlert, parseCommand } from './app.js
 
 let _pipeline = null;
 let _getStats = null;
+let _generateWithMode = null;
+let _generateJayChou = null;
 
-export function init(pipelineFn, getStatsFn) {
+export function init(pipelineFn, getStatsFn, generateWithModeFn, generateJayChouFn) {
   _pipeline = pipelineFn;
   _getStats = getStatsFn;
+  _generateWithMode = generateWithModeFn;
+  _generateJayChou = generateJayChouFn;
 }
 
 export async function startWebSocket() {
@@ -76,15 +80,46 @@ export async function startWebSocket() {
       logger.info(`收到卡片交互: action=${action}, chat=${chatId}`);
 
       if (action === 'fetch_hot') {
-        // 先异步触发抓取，不阻塞响应
+        // 切换到默认模式并执行抓取流程
         (async () => {
-          await sendText('🔄 正在抓取热点，生成文章中，请稍等...', chatId);
+          await sendText('📰 切换到默认模式，正在抓取最新热点并生成文章...', chatId);
           if (_pipeline) {
             try {
-              await _pipeline();
+              // 切换到默认模式
+              config.articleStyle.style = 'default';
+              const result = await _pipeline();
+              if (result && result.message) {
+                await sendText(`ℹ️ ${result.message}`, chatId);
+              } else if (result) {
+                await sendText(`✅ 生成完成：成功 ${result.success}/${result.total} 篇`, chatId);
+              }
             } catch (err) {
               logger.error(`流程异常: ${err.message}`);
-              await sendErrorAlert(err.message, '卡片按钮触发', chatId);
+              await sendErrorAlert(err.message, '立即抓取新热点', chatId);
+            }
+          } else {
+            await sendText('⚠️ 流程函数未初始化，请检查 main.js', chatId);
+          }
+        })().catch(err => logger.error(`卡片触发异常: ${err.message}`));
+      }
+
+      if (action === 'fetch_jaychou') {
+        // 切换到周杰伦歌曲风格并按新模式生成文章
+        (async () => {
+          await sendText('🎵 切换到周杰伦歌曲风格，正在生成文章...', chatId);
+          if (_generateWithMode) {
+            try {
+              // 切换到周杰伦歌曲风格
+              config.articleStyle.style = 'jaychou';
+              const result = await _generateWithMode();
+              if (result.message) {
+                await sendText(`ℹ️ ${result.message}`, chatId);
+              } else {
+                await sendText(`✅ 生成完成：成功 ${result.success}/${result.total} 篇`, chatId);
+              }
+            } catch (err) {
+              logger.error(`流程异常: ${err.message}`);
+              await sendErrorAlert(err.message, '周杰伦歌曲推送', chatId);
             }
           } else {
             await sendText('⚠️ 流程函数未初始化，请检查 main.js', chatId);
@@ -122,33 +157,84 @@ export async function startWebSocket() {
     return;
   }
 
-  logger.info('   支持指令: /hot  /status  /help');
+  logger.info('   支持指令: /push  /status  /mode  /help');
 }
 
 async function handleCommand(text, senderId, chatId) {
   const cmd = parseCommand(text);
 
   if (cmd === 'FETCH_HOT') {
-    await sendText('🔄 正在抓取热点，生成文章中，请稍等...', chatId);
-    if (_pipeline) {
-      try {
-        await _pipeline();
-      } catch (err) {
-        logger.error(`流程异常: ${err.message}`);
-        await sendErrorAlert(err.message, '手动触发（WebSocket）', chatId);
+    // /hot 或 推送文章 - 根据当前模式执行不同逻辑
+    const currentStyle = config.articleStyle?.style || 'default';
+
+    if (currentStyle === 'jaychou') {
+      // 周杰伦歌曲模式：直接生成情感文章（不使用缓存热点）
+      await sendText('🎵 当前为周杰伦歌曲模式，正在生成情感文章...', chatId);
+      if (_generateJayChou) {
+        try {
+          const result = await _generateJayChou();
+          if (result.success) {
+            await sendText('✅ 周杰伦风格情感文章生成完成', chatId);
+          } else {
+            await sendText(`ℹ️ ${result.message || '生成失败'}`, chatId);
+          }
+        } catch (err) {
+          logger.error(`流程异常: ${err.message}`);
+          await sendErrorAlert(err.message, '周杰伦歌曲模式生成', chatId);
+        }
+      } else {
+        await sendText('⚠️ 流程函数未初始化，请检查 main.js', chatId);
       }
     } else {
-      await sendText('⚠️ 流程函数未初始化，请检查 main.js', chatId);
+      // 默认模式：先抓取热点，然后生成文章
+      await sendText('📰 当前为默认模式，正在抓取热点并生成文章...', chatId);
+      if (_pipeline) {
+        try {
+          const result = await _pipeline();
+          if (result && result.message) {
+            await sendText(`ℹ️ ${result.message}`, chatId);
+          } else if (result) {
+            await sendText(`✅ 抓取并生成完成：成功 ${result.success}/${result.total} 篇`, chatId);
+          }
+        } catch (err) {
+          logger.error(`流程异常: ${err.message}`);
+          await sendErrorAlert(err.message, '默认模式抓取生成', chatId);
+        }
+      } else {
+        await sendText('⚠️ 流程函数未初始化，请检查 main.js', chatId);
+      }
     }
   } else if (cmd === 'STATUS') {
     const stats = _getStats ? _getStats() : {};
     await sendStatusCard(stats, chatId);
+  } else if (cmd === 'MODE') {
+    const currentStyle = config.articleStyle?.style || 'default';
+    const styleName = currentStyle === 'jaychou' ? '🎵 周杰伦歌曲' : '📰 默认模式';
+    await sendText(
+      `📝 当前生成模式: ${styleName}\n\n` +
+      '切换方式:\n' +
+      '• 1 — 切换为 🎵 周杰伦歌曲\n' +
+      '• 2 — 切换为 📰 默认模式',
+      chatId
+    );
+  } else if (cmd === 'MODE_1') {
+    config.articleStyle.style = 'jaychou';
+    await sendText('✅ 已切换为 🎵 周杰伦歌曲模式', chatId);
+  } else if (cmd === 'MODE_2') {
+    config.articleStyle.style = 'default';
+    await sendText('✅ 已切换为 📰 默认模式', chatId);
   } else if (cmd === 'HELP') {
+    const style = config.articleStyle?.style || 'default';
+    const styleName = style === 'jaychou' ? '🎵 周杰伦歌曲' : '📰 默认模式';
     await sendText(
       '🤖 热点内容机器人指令：\n\n' +
-      '• /hot 或 抓取热点 — 立即爬取热点并生成文章\n' +
+      '• /push 或 推送文章 — 根据当前模式推送文章\n' +
+      '   - 🎵 周杰伦歌曲模式：直接生成文章\n' +
+      '   - 📰 默认模式：先抓取热点再生成文章\n' +
       '• /status 或 状态 — 查看系统运行状态\n' +
+      '• /mode 或 模式 — 查看当前生成模式\n' +
       '• /help 或 帮助 — 显示此帮助信息\n\n' +
+      `📝 当前生成模式: ${styleName}\n` +
       '系统按配置的 Cron 表达式自动运行。',
       chatId
     );
