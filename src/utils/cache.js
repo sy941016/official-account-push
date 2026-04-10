@@ -1,50 +1,55 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'fs';
 import { createHash } from 'crypto';
 import { dirname } from 'path';
 import config from '../../config/index.js';
+import logger from './logger.js';
+
+/** 已处理话题 ID 的保留上限 */
+const MAX_PROCESSED = 1000;
 
 /**
  * 生成话题唯一ID（md5前12位）
+ * @param {string} title
+ * @returns {string}
  */
 export function topicId(title) {
-  return createHash('md5').update(title).digest('hex').slice(0, 12);
+  return createHash('md5').update(String(title)).digest('hex').slice(0, 12);
 }
 
 /**
  * 加载已处理话题ID集合
+ * @returns {Set<string>}
  */
 export function loadProcessed() {
   if (!existsSync(config.cacheFile)) return new Set();
   try {
     const data = JSON.parse(readFileSync(config.cacheFile, 'utf-8'));
-    return new Set(data.ids || []);
+    const ids = Array.isArray(data?.ids) ? data.ids : [];
+    return new Set(ids.slice(-MAX_PROCESSED));
   } catch {
     return new Set();
   }
 }
 
 /**
- * 保存已处理话题ID（最多保留1000条）
- */
-export function saveProcessed(id) {
-  mkdirSync(dirname(config.cacheFile), { recursive: true });
-  const set = loadProcessed();
-  set.add(id);
-  const ids = [...set].slice(-1000);
-  writeFileSync(config.cacheFile, JSON.stringify({ ids }, null, 2), 'utf-8');
-}
-
-/**
- * 批量保存已处理话题ID（最多保留1000条）
+ * 批量保存已处理话题ID（最多保留 MAX_PROCESSED 条）
+ * 先写临时文件再 rename，避免进程被杀时留下半个 JSON 文件
  * @param {string[]} newIds
  */
 export function saveProcessedBatch(newIds) {
   if (!newIds || newIds.length === 0) return;
-  mkdirSync(dirname(config.cacheFile), { recursive: true });
-  const set = loadProcessed();
-  for (const id of newIds) set.add(id);
-  const ids = [...set].slice(-1000);
-  writeFileSync(config.cacheFile, JSON.stringify({ ids }, null, 2), 'utf-8');
+  try {
+    mkdirSync(dirname(config.cacheFile), { recursive: true });
+    const set = loadProcessed();
+    for (const id of newIds) set.add(id);
+    const ids = [...set].slice(-MAX_PROCESSED);
+
+    const tmpFile = `${config.cacheFile}.tmp`;
+    writeFileSync(tmpFile, JSON.stringify({ ids }, null, 2), 'utf-8');
+    renameSync(tmpFile, config.cacheFile);
+  } catch (err) {
+    logger.error(`写入已处理缓存失败: ${err.message}`);
+  }
 }
 
 /**
@@ -61,7 +66,7 @@ const AD_KEYWORDS = [
 ];
 
 export function isAdTopic(title) {
-  return AD_KEYWORDS.some((kw) => title.includes(kw));
+  return AD_KEYWORDS.some((kw) => String(title).includes(kw));
 }
 
 /**
@@ -93,8 +98,9 @@ export function getLabelMultiplier(labelName = '') {
  * @returns {number}
  */
 export function computeViralScore(rank, topN, hotValue = 0, labelName = '') {
+  const safeTopN = Math.max(1, topN);
   // 排名得分：第1名=100，最后=~3（归一化，跨平台公平）
-  const rankScore = ((topN - rank + 1) / topN) * 100;
+  const rankScore = ((safeTopN - rank + 1) / safeTopN) * 100;
   // 热度补偿：对数压缩，限制在 0~30，避免平台数量级差异主导
   const hotBonus = hotValue > 0 ? Math.min(30, Math.log10(hotValue + 1) * 5) : 0;
   const multiplier = getLabelMultiplier(labelName);
@@ -102,37 +108,9 @@ export function computeViralScore(rank, topN, hotValue = 0, labelName = '') {
 }
 
 /**
- * 提取关键词（用于配图搜索）
- */
-export function extractKeywords(title) {
-  const stopwords = new Set(['的', '了', '在', '是', '我', '有', '和', '就', '不', '人',
-    '都', '一', '上', '也', '很', '到', '说', '要', '去', '你', '会', '着']);
-  return title.match(/[\u4e00-\u9fa5A-Za-z0-9]+/g)
-    ?.filter(w => !stopwords.has(w) && w.length >= 2)
-    .slice(0, 5) || [];
-}
-
-/**
- * 中文话题标题 → 英文搜索词（简单映射，建议接翻译API）
- */
-const CN_EN_MAP = {
-  科技: 'technology', 经济: 'economy', 政治: 'politics', 体育: 'sports',
-  娱乐: 'entertainment', 教育: 'education', 健康: 'health', 美食: 'food',
-  旅游: 'travel', 时尚: 'fashion', 社会: 'society', 国际: 'international',
-  明星: 'celebrity', 电影: 'movie', 音乐: 'music', 汽车: 'automobile',
-  人工智能: 'artificial intelligence', 房产: 'real estate', 股市: 'stock market',
-  战争: 'war', 环境: 'environment', 医疗: 'medical',
-};
-
-export function toEnglishQuery(title) {
-  for (const [cn, en] of Object.entries(CN_EN_MAP)) {
-    if (title.includes(cn)) return en;
-  }
-  return 'news trending';
-}
-
-/**
  * 格式化热度数值
+ * @param {number} value
+ * @returns {string}
  */
 export function formatHot(value) {
   if (!value) return '0';

@@ -7,15 +7,16 @@
  *   - 每条输出 viralScore（跨平台可比），供主流程排序
  */
 import axios from 'axios';
-import * as cheerio from 'cheerio';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import { topicId, isAdTopic, computeViralScore } from '../utils/cache.js';
+import { topicId, isAdTopic, computeViralScore, formatHot } from '../utils/cache.js';
 
 const BASE_HEADERS = {
   ...config.defaultHeaders,
   Referer: 'https://weibo.com/',
 };
+
+const TIMEOUT = config.crawler.requestTimeoutMs;
 
 /**
  * 爬取微博热搜，返回标准化数组
@@ -52,7 +53,7 @@ async function fetchFromOfficialApi(topN) {
 
     const { data } = await axios.get(config.crawler.weiboUrl, {
       headers,
-      timeout: 10_000,
+      timeout: TIMEOUT,
     });
 
     const items = data?.data?.realtime || [];
@@ -80,7 +81,7 @@ async function fetchFromOfficialApi(topN) {
       const noteText = item.note ? item.note.replace(/<[^>]+>/g, '').trim() : '';
       const summary = noteText
         ? `${labelTag}${noteText}`
-        : `${labelTag}微博热搜第${rank}位：${title}（热度${formatHotShort(hotValue)}）`;
+        : `${labelTag}微博热搜第${rank}位：${title}（热度${formatHot(hotValue)}）`;
 
       results.push(normalize({
         title,
@@ -105,29 +106,31 @@ async function fetchFromOfficialApi(topN) {
 async function fetchFromTenApi(topN) {
   try {
     const { data } = await axios.get(config.crawler.weiboFallbackUrl, {
-      timeout: 8_000,
+      timeout: TIMEOUT,
       headers: config.defaultHeaders,
     });
 
     // tenapi 返回格式：{ code: 200, data: [{name, hot, url}] }
-    const items = Array.isArray(data?.data) ? data.data : [];
-    const results = items.slice(0, topN).map((item, i) => {
-      const title = item.name || item.title || '';
-      if (!title || isAdTopic(title)) return null;
+    const items = (Array.isArray(data?.data) ? data.data : [])
+      .map((item) => ({ title: item.name || item.title || '', hot: item.hot }))
+      .filter((item) => item.title && !isAdTopic(item.title))
+      .slice(0, topN);
+
+    const results = items.map((item, i) => {
       const rank = i + 1;
       const hotValue = parseInt(item.hot || '0', 10) || 0;
-      const viralScore = computeViralScore(rank, topN, hotValue, '');
+      const viralScore = computeViralScore(rank, items.length, hotValue, '');
       return normalize({
-        title,
+        title: item.title,
         hotValue,
         viralScore,
         viralLabel: '',
         rank,
         category: '社会',
-        summary: `微博热搜第${rank}位：${title}（热度${formatHotShort(hotValue)}）`,
+        summary: `微博热搜第${rank}位：${item.title}（热度${formatHot(hotValue)}）`,
         source: 'weibo',
       });
-    }).filter(Boolean);
+    });
 
     logger.info(`微博第三方API：获取 ${results.length} 条`);
     return results;
@@ -139,12 +142,15 @@ async function fetchFromTenApi(topN) {
 
 async function fetchFromWebpage(topN) {
   try {
+    // cheerio 是个重量级依赖，而这里只是三级兜底策略，按需加载即可
+    const cheerio = await import('cheerio');
+
     const headers = { ...BASE_HEADERS };
     if (config.crawler.weiboCookie) headers['Cookie'] = config.crawler.weiboCookie;
 
     const { data: html } = await axios.get(config.crawler.weiboBackupUrl, {
       headers,
-      timeout: 12_000,
+      timeout: TIMEOUT,
     });
 
     const $ = cheerio.load(html);
@@ -191,14 +197,6 @@ function normalize({ title, hotValue, viralScore = 0, viralLabel = '', rank, cat
   };
 }
 
-/** 格式化热度为短文本（用于 summary） */
-function formatHotShort(value) {
-  if (!value) return '未知';
-  if (value >= 1e8) return `${(value / 1e8).toFixed(1)}亿`;
-  if (value >= 1e4) return `${(value / 1e4).toFixed(0)}万`;
-  return String(value);
-}
-
 function stripHtml(str) {
-  return str.replace(/<[^>]+>/g, '').trim();
+  return String(str).replace(/<[^>]+>/g, '').trim();
 }

@@ -21,3 +21,14 @@ debug.log
 AGENT.md
 .qoder
 logs/
+
+# 本地环境变量（含密钥，禁止提交）
+.env
+.env.local
+.env.*.local
+
+# AI 助手工作目录（本地记忆/配置，禁止提交）
+.workbuddy-ai/
+.workbuddy/
+.cursor/
+.claude/

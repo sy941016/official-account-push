@@ -1,4 +1,28 @@
 import 'dotenv/config';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
+
+/** 项目根目录（config/ 的上一级），用于锚定所有相对路径，避免依赖启动时的 cwd */
+export const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** 把可能是相对路径的配置项统一解析为绝对路径 */
+const fromRoot = (p) => (p.startsWith('/') ? p : join(projectRoot, p));
+
+const int = (value, fallback) => {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+const num = (value, fallback) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+};
+
+/** 环境变量里的布尔值。未设置/空串走 fallback；其余按 0/false/no/off 判否 */
+const bool = (value, fallback) => {
+  if (value === undefined || value === '') return fallback;
+  return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+};
 
 export const config = {
   // AI
@@ -10,6 +34,10 @@ export const config = {
     openaiModel: process.env.OPENAI_MODEL || 'gpt-4o',
     doubaoKey: process.env.DOUBAO_API_KEY || '',
     doubaoModel: process.env.DOUBAO_MODEL || 'doubao-pro-1-5',
+    doubaoBaseUrl: process.env.DOUBAO_BASE_URL || 'https://ark.cn-beijing.volces.com/api/v3',
+    // 单次 LLM 请求超时（毫秒）与失败重试次数
+    requestTimeoutMs: int(process.env.AI_REQUEST_TIMEOUT_MS, 180_000),
+    maxRetries: int(process.env.AI_MAX_RETRIES, 3),
   },
 
   // 微信公众号
@@ -29,29 +57,73 @@ export const config = {
     apiBase: 'https://open.feishu.cn/open-apis',
   },
 
-  // 图片服务
+  // 图片服务：按文章内容去图库搜图，插入正文并作为封面
+  // provider 设为 none 可整体关闭（关闭后行为与旧版一致：正文无图、封面取素材库第一张）
   image: {
     provider: process.env.IMAGE_PROVIDER || 'unsplash',
     unsplashKey: process.env.UNSPLASH_ACCESS_KEY || '',
     pexelsKey: process.env.PEXELS_API_KEY || '',
+    // 每篇文章插入正文的配图数量
+    count: int(process.env.IMAGE_COUNT, 2),
+    // 是否把第一张配图同时用作封面。
+    // 注意：微信要求封面必须是永久素材的 media_id，开启后会往你的公众号素材库上传图片。
+    asCover: bool(process.env.IMAGE_AS_COVER, true),
+    requestTimeoutMs: int(process.env.IMAGE_REQUEST_TIMEOUT_MS, 15_000),
+    unsplashApiBase: 'https://api.unsplash.com',
+    pexelsApiBase: 'https://api.pexels.com',
   },
 
   // 爬虫
   crawler: {
+    // 下面这些接口地址都是固定的常量（不是环境变量）。
+    // 集中放在这里是为了：① 一眼看清三级兜底分别打哪个接口；② 测试时能改指向本地 mock 服务。
     weiboUrl: 'https://weibo.com/ajax/side/hotSearch',
     douyinUrl: 'https://www.douyin.com/aweme/v1/web/hot/search/list/',
+    douyinMobileUrl: 'https://www.douyin.com/web/api/v2/hotsearch/billboard/word/',
     weiboBackupUrl: 'https://s.weibo.com/top/summary',
-    weiboFallbackUrl: 'https://tenapi.cn/v2/weibohot',  // 第三方接口备用
+    weiboFallbackUrl: 'https://tenapi.cn/v2/weibohot', // 第三方接口备用
+    douyinFallbackUrl: 'https://tenapi.cn/v2/douyinhot',
     weiboCookie: process.env.WEIBO_COOKIE || '',
     douyinCookie: process.env.DOUYIN_COOKIE || '',
+    requestTimeoutMs: int(process.env.CRAWLER_TIMEOUT_MS, 15_000),
   },
 
   // 运行
   run: {
     cronSchedule: process.env.CRON_SCHEDULE || '0 */2 * * *',
-    topicsPerRun: parseInt(process.env.TOPICS_PER_RUN || '3', 10),
-    localServerPort: parseInt(process.env.LOCAL_SERVER_PORT || '8080', 10),
+    topicsPerRun: int(process.env.TOPICS_PER_RUN, 3),
+    // 两条话题之间的间隔，避免触发平台频控
+    topicIntervalMs: num(process.env.TOPIC_INTERVAL_SECONDS, 5) * 1000,
+    localServerPort: int(process.env.LOCAL_SERVER_PORT, 8080),
     logLevel: process.env.LOG_LEVEL || 'info',
+    // HTTP 请求体大小上限（字节），防止内存被撑爆
+    maxBodyBytes: int(process.env.MAX_BODY_BYTES, 1_000_000),
+  },
+
+  // Agent 配置
+  agent: {
+    maxIterations: int(process.env.AGENT_MAX_ITERATIONS, 10), // Agent 最大循环次数
+    memorySize: int(process.env.AGENT_MEMORY_SIZE, 20), // 每个会话保留的消息条数
+    webPort: int(process.env.AGENT_WEB_PORT, 3000), // Web 聊天服务端口
+    webCorsOrigin: process.env.WEB_CORS_ORIGIN || '*', // Web 允许的跨域来源
+    webAccessToken: process.env.WEB_ACCESS_TOKEN || '', // 留空则不校验
+    // 单条工具结果写入对话记忆时的截断长度，避免上下文膨胀
+    maxToolResultChars: int(process.env.AGENT_MAX_TOOL_RESULT_CHARS, 8_000),
+  },
+
+  // 日志
+  log: {
+    level: process.env.LOG_LEVEL || 'info',
+    // 下限 1KB，避免误配成 0 导致每写一行就轮转一次
+    maxSizeBytes: Math.max(1024, int(process.env.LOG_MAX_SIZE_MB, 10) * 1024 * 1024),
+    maxFiles: Math.max(1, int(process.env.LOG_MAX_FILES, 7)),
+    dir: fromRoot(process.env.LOG_DIR || 'logs'),
+  },
+
+  // 文章生成风格配置
+  articleStyle: {
+    // 可选风格: 'default' | 'jaychou'
+    style: process.env.ARTICLE_STYLE || 'default',
   },
 
   // 通用请求头
@@ -63,10 +135,107 @@ export const config = {
     'Accept-Language': 'zh-CN,zh;q=0.9',
   },
 
-  // 缓存文件
-  cacheFile: '.cache/processed_topics.json',
-  tokenCacheFile: '.cache/wechat_token.json',
-  imageCacheDir: '.cache/images',
+  // 缓存文件（绝对路径，与启动目录无关）
+  cacheFile: fromRoot(process.env.CACHE_FILE || '.cache/processed_topics.json'),
+  tokenCacheFile: fromRoot(process.env.WECHAT_TOKEN_CACHE_FILE || '.cache/wechat_token.json'),
+  imageCacheDir: fromRoot('.cache/images'),
 };
+
+const VALID_PROVIDERS = ['claude', 'openai', 'doubao'];
+const PROVIDER_KEY_FIELD = {
+  claude: ['anthropicKey', 'ANTHROPIC_API_KEY'],
+  openai: ['openaiKey', 'OPENAI_API_KEY'],
+  doubao: ['doubaoKey', 'DOUBAO_API_KEY'],
+};
+const VALID_STYLES = ['default', 'jaychou'];
+const VALID_IMAGE_PROVIDERS = ['unsplash', 'pexels', 'none'];
+
+/**
+ * 占位值检测。
+ * `.env.example` 里的示例值（your_xxx / xxx / placeholder ...）经常被原样留在 `.env` 里，
+ * 只判断"非空"会误以为已配置，然后在运行时拿到一个 401，排查起来很绕。
+ */
+const PLACEHOLDER_PATTERN = /^(your[_-]|xxx|placeholder|changeme|todo|sk-xxx)/i;
+export const isPlaceholder = (value) => PLACEHOLDER_PATTERN.test(String(value ?? '').trim());
+
+/** 真正可用的 key（非空且不是占位值） */
+const usableKey = (value) => Boolean(value) && !isPlaceholder(value);
+
+/**
+ * 配图能力是否可用：provider 有效、对应 key 真实配置、且数量 > 0。
+ * 调用方据此决定要不要走搜图流程——不可用时静默跳过，不影响发布。
+ */
+export function isImageEnabled() {
+  const { provider, unsplashKey, pexelsKey, count } = config.image;
+  if (provider === 'none' || count <= 0) return false;
+  if (provider === 'unsplash') return usableKey(unsplashKey);
+  if (provider === 'pexels') return usableKey(pexelsKey);
+  return false;
+}
+
+/**
+ * 启动期配置校验：尽早暴露"跑起来才发现"的配置错误
+ * @returns {{errors: string[], warnings: string[]}}
+ */
+export function validateConfig() {
+  const errors = [];
+  const warnings = [];
+
+  if (!VALID_PROVIDERS.includes(config.ai.provider)) {
+    errors.push(`AI_PROVIDER 无效: "${config.ai.provider}"，可选 ${VALID_PROVIDERS.join(' / ')}`);
+  } else {
+    const [field, envName] = PROVIDER_KEY_FIELD[config.ai.provider];
+    if (!config.ai[field]) errors.push(`AI_PROVIDER=${config.ai.provider} 但未配置 ${envName}`);
+  }
+
+  if (!VALID_STYLES.includes(config.articleStyle.style)) {
+    warnings.push(`ARTICLE_STYLE 无效: "${config.articleStyle.style}"，回退为 default`);
+    config.articleStyle.style = 'default';
+  }
+
+  if (config.run.topicsPerRun < 1) {
+    warnings.push(`TOPICS_PER_RUN 应 >= 1，已回退为 1`);
+    config.run.topicsPerRun = 1;
+  }
+
+  if (config.agent.maxIterations < 1) {
+    warnings.push('AGENT_MAX_ITERATIONS 应 >= 1，已回退为 10');
+    config.agent.maxIterations = 10;
+  }
+
+  // 记忆窗口太小会把 tool_call / tool_result 配对切碎，导致模型接口报错
+  if (config.agent.memorySize < 8) {
+    warnings.push('AGENT_MEMORY_SIZE 过小（< 8），可能导致工具调用上下文被截断，已提升为 8');
+    config.agent.memorySize = 8;
+  }
+
+  if (!config.wechat.appId) warnings.push('微信公众号未配置，将跳过草稿发布');
+  if (!config.feishu.appId) warnings.push('飞书未配置，将跳过飞书通知与机器人');
+  if (!config.crawler.weiboCookie) warnings.push('WEIBO_COOKIE 未配置，微博爬取成功率可能偏低');
+
+  // 配图：配置不完整只降级，不算错误——不能因为图库没配好就发不出文章
+  if (!VALID_IMAGE_PROVIDERS.includes(config.image.provider)) {
+    warnings.push(
+      `IMAGE_PROVIDER 无效: "${config.image.provider}"，可选 ${VALID_IMAGE_PROVIDERS.join(' / ')}，已关闭配图`
+    );
+    config.image.provider = 'none';
+  } else if (config.image.provider !== 'none') {
+    const key = config.image.provider === 'unsplash' ? config.image.unsplashKey : config.image.pexelsKey;
+    const envName = config.image.provider === 'unsplash' ? 'UNSPLASH_ACCESS_KEY' : 'PEXELS_API_KEY';
+    if (!key) warnings.push(`IMAGE_PROVIDER=${config.image.provider} 但未配置 ${envName}，将跳过配图`);
+    else if (isPlaceholder(key))
+      warnings.push(`${envName} 还是占位值（"${key}"），请换成真实 Key，否则将跳过配图`);
+  }
+  if (config.image.count < 0) {
+    warnings.push('IMAGE_COUNT 不能为负，已回退为 0');
+    config.image.count = 0;
+  }
+  if (!config.wechat.appId && config.image.asCover) {
+    // 封面要上传永久素材，得先有公众号凭证
+    warnings.push('未配置微信公众号，IMAGE_AS_COVER 不会生效');
+  }
+
+  return { errors, warnings };
+}
 
 export default config;

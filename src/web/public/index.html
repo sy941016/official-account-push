@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AI Agent - 公众号内容助手</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Header */
+    .header {
+      background: #07C160;
+      color: white;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+    .header h1 { font-size: 18px; font-weight: 600; }
+    .header .status { font-size: 12px; opacity: 0.8; }
+    .header button {
+      background: rgba(255,255,255,0.2);
+      border: none;
+      color: white;
+      padding: 6px 12px;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    .header button:hover { background: rgba(255,255,255,0.3); }
+
+    /* Chat Area */
+    .chat-container {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .message {
+      max-width: 75%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      line-height: 1.6;
+      word-break: break-word;
+      white-space: pre-wrap;
+    }
+    .message.user {
+      align-self: flex-end;
+      background: #07C160;
+      color: white;
+      border-bottom-right-radius: 4px;
+    }
+    .message.agent {
+      align-self: flex-start;
+      background: white;
+      color: #333;
+      border-bottom-left-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .message.system {
+      align-self: center;
+      background: #fff3cd;
+      color: #856404;
+      font-size: 12px;
+      border-radius: 8px;
+    }
+
+    /* Thinking Steps */
+    .thinking-steps {
+      align-self: flex-start;
+      max-width: 75%;
+      background: #f8f9fa;
+      border: 1px solid #e9ecef;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 12px;
+      color: #666;
+    }
+    .thinking-steps .step {
+      padding: 4px 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .thinking-steps .step .icon { font-size: 14px; }
+    .thinking-steps .step.tool_call { color: #0066cc; }
+    .thinking-steps .step.tool_result { color: #28a745; }
+
+    /* Loading */
+    .loading {
+      align-self: flex-start;
+      background: white;
+      padding: 12px 16px;
+      border-radius: 12px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .loading .dots {
+      display: inline-flex;
+      gap: 4px;
+    }
+    .loading .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #07C160;
+      animation: bounce 1.4s infinite ease-in-out both;
+    }
+    .loading .dot:nth-child(1) { animation-delay: -0.32s; }
+    .loading .dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes bounce {
+      0%, 80%, 100% { transform: scale(0); }
+      40% { transform: scale(1); }
+    }
+
+    /* Input Area */
+    .input-area {
+      background: white;
+      padding: 16px 20px;
+      border-top: 1px solid #e9ecef;
+      display: flex;
+      gap: 12px;
+      align-items: flex-end;
+    }
+    .input-area textarea {
+      flex: 1;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 14px;
+      resize: none;
+      outline: none;
+      max-height: 120px;
+      min-height: 42px;
+      font-family: inherit;
+      line-height: 1.5;
+    }
+    .input-area textarea:focus { border-color: #07C160; }
+    .input-area button {
+      background: #07C160;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 20px;
+      font-size: 14px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .input-area button:hover { background: #06ae56; }
+    .input-area button:disabled { background: #ccc; cursor: not-allowed; }
+
+    /* Quick Actions */
+    .quick-actions {
+      display: flex;
+      gap: 8px;
+      padding: 8px 20px;
+      background: white;
+      border-top: 1px solid #f0f0f0;
+      flex-wrap: wrap;
+    }
+    .quick-actions button {
+      background: #f0f7f4;
+      border: 1px solid #d4edda;
+      color: #155724;
+      padding: 6px 12px;
+      border-radius: 16px;
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .quick-actions button:hover { background: #d4edda; }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div>
+      <h1>AI Agent - 公众号内容助手</h1>
+      <div class="status">热点采集 / AI写作 / 自动发布</div>
+    </div>
+    <button onclick="resetChat()">清空会话</button>
+  </div>
+
+  <div class="chat-container" id="chatContainer">
+    <div class="message agent">你好！我是你的公众号内容运营 AI 助手。我可以帮你：
+
+- 爬取微博/抖音热点
+- 生成高质量文章（爆款风格 / 周杰伦情感风格）
+- 推送到微信公众号草稿箱
+
+直接告诉我你想做什么吧！</div>
+  </div>
+
+  <div class="quick-actions">
+    <button onclick="quickSend('帮我看看今天微博和抖音有什么热点')">看看今天热点</button>
+    <button onclick="quickSend('用最热的话题生成一篇爆款文章')">生成爆款文章</button>
+    <button onclick="quickSend('用周杰伦风格写一篇情感文章')">周杰伦风格</button>
+    <button onclick="quickSend('查看系统运行状态')">系统状态</button>
+  </div>
+
+  <div class="input-area">
+    <textarea id="messageInput" placeholder="输入你的指令..." rows="1"
+      onkeydown="handleKeydown(event)" oninput="autoResize(this)"></textarea>
+    <button id="sendBtn" onclick="sendMessage()">发送</button>
+  </div>
+
+  <script>
+    const chatContainer = document.getElementById('chatContainer');
+    const messageInput = document.getElementById('messageInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const sessionId = 'web_' + Math.random().toString(36).slice(2, 10);
+    let isLoading = false;
+
+    function autoResize(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    }
+
+    function handleKeydown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendMessage();
+      }
+    }
+
+    function addMessage(content, role) {
+      const div = document.createElement('div');
+      div.className = `message ${role}`;
+      div.textContent = content;
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+      return div;
+    }
+
+    function addThinkingSteps(steps) {
+      if (!steps || steps.length === 0) return;
+      const div = document.createElement('div');
+      div.className = 'thinking-steps';
+
+      const toolNames = {
+        crawl_weibo: '爬取微博热搜',
+        crawl_douyin: '爬取抖音热点',
+        generate_article: '生成文章',
+        publish_to_wechat: '推送到公众号',
+        send_feishu_notification: '发送飞书通知',
+        get_system_status: '查询系统状态',
+        search_cached_topics: '搜索缓存热点',
+      };
+
+      for (const step of steps) {
+        const stepDiv = document.createElement('div');
+        stepDiv.className = `step ${step.type}`;
+
+        if (step.type === 'thought') {
+          stepDiv.innerHTML = `<span class="icon">💭</span><span>${escapeHtml(step.content.slice(0, 200))}</span>`;
+        } else if (step.type === 'tool_call') {
+          const name = toolNames[step.name] || step.name;
+          stepDiv.innerHTML = `<span class="icon">⚙️</span><span>调用: ${escapeHtml(name)}</span>`;
+        } else if (step.type === 'tool_result') {
+          const name = toolNames[step.name] || step.name;
+          const preview = step.result.length > 100 ? step.result.slice(0, 100) + '...' : step.result;
+          stepDiv.innerHTML = `<span class="icon">✅</span><span>${escapeHtml(name)}: ${escapeHtml(preview)}</span>`;
+        }
+        div.appendChild(stepDiv);
+      }
+
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function showLoading() {
+      const div = document.createElement('div');
+      div.className = 'loading';
+      div.id = 'loadingIndicator';
+      div.innerHTML = '<div class="dots"><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>';
+      chatContainer.appendChild(div);
+      chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    function hideLoading() {
+      const el = document.getElementById('loadingIndicator');
+      if (el) el.remove();
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('span');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    async function sendMessage() {
+      const text = messageInput.value.trim();
+      if (!text || isLoading) return;
+
+      isLoading = true;
+      sendBtn.disabled = true;
+      messageInput.value = '';
+      messageInput.style.height = 'auto';
+
+      addMessage(text, 'user');
+      showLoading();
+
+      try {
+        const res = await fetch('/api/chat', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: text, sessionId }),
+        });
+
+        hideLoading();
+
+        if (!res.ok) {
+          const err = await res.json();
+          addMessage(`出错了: ${err.error || '请求失败'}`, 'system');
+          return;
+        }
+
+        const data = await res.json();
+
+        // 显示思考步骤
+        if (data.thinkingSteps && data.thinkingSteps.length > 0) {
+          addThinkingSteps(data.thinkingSteps);
+        }
+
+        // 显示最终回复
+        if (data.reply) {
+          addMessage(data.reply, 'agent');
+        }
+      } catch (err) {
+        hideLoading();
+        addMessage(`网络错误: ${err.message}`, 'system');
+      } finally {
+        isLoading = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+      }
+    }
+
+    function quickSend(text) {
+      messageInput.value = text;
+      sendMessage();
+    }
+
+    async function resetChat() {
+      try {
+        await fetch('/api/reset', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+        });
+        chatContainer.innerHTML = '';
+        addMessage('会话已清空，重新开始对话吧！', 'agent');
+      } catch (err) {
+        addMessage(`清空失败: ${err.message}`, 'system');
+      }
+    }
+
+    // 自动聚焦输入框
+    messageInput.focus();
+  </script>
+</body>
+</html>

@@ -1,34 +1,32 @@
 {
   "name": "official-account-push",
-  "version": "1.0.0",
-  "description": "热点内容自动化发布系统：爬取微博/抖音热点 → AI生成文章 → 推送公众号 → 飞书通知",
+  "version": "2.1.0",
+  "description": "AI Agent 公众号内容助手：自然语言对话 → 爬取热点 → AI生成文章 → 推送公众号",
   "main": "src/main.js",
   "type": "module",
   "scripts": {
-    "start": "node src/main.js",
+    "start": "node src/main.js --mode=websocket",
     "once": "node src/main.js --mode=once",
+    "dry-run": "node src/main.js --mode=once --dry-run",
     "scheduler": "node src/main.js --mode=scheduler",
     "websocket": "node src/main.js --mode=websocket",
     "server": "node src/main.js --mode=server",
+    "web": "node src/main.js --mode=web",
     "weibo-only": "node src/main.js --mode=once --source=weibo",
     "douyin-only": "node src/main.js --mode=once --source=douyin",
-    "dev": "node --watch src/main.js --mode=once"
+    "dev": "node --watch src/main.js --mode=web",
+    "test": "node --test"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
-    "@larksuiteoapi/node-sdk": "1.1.0",
+    "@larksuiteoapi/node-sdk": "^1.60.0",
     "axios": "^1.7.0",
     "cheerio": "1.0.0-rc.12",
     "dotenv": "^16.4.0",
-    "form-data": "^4.0.0",
     "node-cron": "^3.0.3",
-    "openai": "^4.47.0",
-    "winston": "3.3.3"
+    "openai": "^4.47.0"
   },
   "engines": {
     "node": ">=18.0.0"
-  },
-  "resolutions": {
-    "@dabh/diagnostics": "2.0.2"
   }
 }

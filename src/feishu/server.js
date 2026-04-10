@@ -1,9 +1,10 @@
 /**
  * 飞书机器人 - 本地 HTTP 事件回调服务
+ * Agent 模式：消息交给 Agent 处理
  * 需配合 ngrok / frp 等内网穿透工具
  *
  * 启动步骤：
- * 1. node src/feishu/server.js（或 npm run server）
+ * 1. node src/main.js --mode=server
  * 2. ngrok http 8080
  * 3. 将 https://xxxx.ngrok.io/feishu/event 填入飞书开放平台 → 事件订阅 → 请求地址
  */
@@ -11,17 +12,24 @@ import { createServer } from 'http';
 import { createHash, createDecipheriv } from 'crypto';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import { sendText, sendStatusCard, sendErrorAlert, parseCommand } from './app.js';
+import { readBody, createDedupeCache } from '../utils/helpers.js';
+import { sendText, sendErrorAlert } from './app.js';
 
 const { verificationToken, encryptKey } = config.feishu;
 const PORT = config.run.localServerPort;
 
-let _pipeline = null;
-let _getStats = null;
+/** 事件重复投递去重（5 分钟窗口） */
+const _seenMessages = createDedupeCache();
 
-export function init(pipelineFn, getStatsFn) {
-  _pipeline = pipelineFn;
-  _getStats = getStatsFn;
+/** @type {import('../agent/core.js').default} */
+let _agent = null;
+
+/**
+ * 初始化 HTTP 回调服务
+ * @param {import('../agent/core.js').default} agent
+ */
+export function init(agent) {
+  _agent = agent;
 }
 
 export function startLocalServer() {
@@ -50,7 +58,13 @@ async function handleRequest(req, res) {
 
   // 飞书事件
   if (method === 'POST' && url === '/feishu/event') {
-    const body = await readBody(req);
+    let body;
+    try {
+      body = await readBody(req, config.run.maxBodyBytes);
+    } catch (err) {
+      return json(res, err.statusCode || 400, { error: err.message });
+    }
+
     let data;
     try {
       data = JSON.parse(body);
@@ -75,7 +89,18 @@ async function handleRequest(req, res) {
       return json(res, 200, { challenge: data.challenge });
     }
 
-    // 事件回调——必须立即返回 200，异步处理
+    // 事件回调——真实事件同样要校验 token，否则任何知道地址的人都能触发 Agent
+    if (verificationToken) {
+      const eventToken = data?.header?.token || data?.token || '';
+      if (eventToken !== verificationToken) {
+        logger.warn('飞书事件Token校验失败，已拒绝该请求');
+        return json(res, 403, { error: 'token mismatch' });
+      }
+    } else {
+      logger.warn('未配置 FEISHU_VERIFICATION_TOKEN，事件回调无鉴权保护，建议补充配置');
+    }
+
+    // 立即返回 200，异步处理
     json(res, 200, { code: 0 });
 
     const eventType = data?.header?.event_type || '';
@@ -93,46 +118,45 @@ async function handleRequest(req, res) {
 async function handleMessageEvent(event) {
   try {
     const msg = event?.message || {};
+
+    // 飞书未及时收到 200 时会重推同一事件，按 message_id 去重避免重复执行
+    if (msg.message_id && _seenMessages.seen(msg.message_id)) {
+      logger.info(`忽略重复投递的飞书消息: ${msg.message_id}`);
+      return;
+    }
+
     if (msg.message_type !== 'text') return;
 
     const content = JSON.parse(msg.content || '{}');
     let text = (content.text || '').trim();
-    const senderId = event?.sender?.sender_id?.user_id || '';
     const chatId = msg.chat_id || '';
 
-    // 移除@机器人的各种格式
-    // 1. 移除 <at id="xxx"></at>
-    // 2. 移除 @_user_1 这种可能的占位符
-    // 3. 移除首尾空格
-    text = text.replace(/<at id="[^>]+><\/at>/g, '')
+    // 移除@机器人的格式
+    text = text.replace(/<at id="[^>]+"><\/at>/g, '')
                .replace(/@[^\s]+\s?/g, '')
                .trim();
 
-    logger.info(`收到飞书消息: "${text}" (chat: ${chatId}, from: ${senderId})`);
+    if (!text) return;
 
-    const cmd = parseCommand(text);
+    logger.info(`收到飞书消息: "${text}" (chat: ${chatId})`);
 
-    if (cmd === 'FETCH_HOT') {
-      await sendText('🔄 正在抓取热点，生成文章中，请稍等...', chatId);
-      if (_pipeline) {
-        try { await _pipeline(); }
-        catch (err) { await sendErrorAlert(err.message, '手动触发（HTTP Server）', chatId); }
-      } else {
-        await sendText('⚠️ 流程函数未初始化', chatId);
-      }
-    } else if (cmd === 'STATUS') {
-      await sendStatusCard(_getStats ? _getStats() : {}, chatId);
-    } else if (cmd === 'HELP') {
-      await sendText(
-        '🤖 热点内容机器人指令：\n\n' +
-        '• /hot 或 抓取热点 — 立即爬取热点并生成文章\n' +
-        '• /status 或 状态 — 查看系统运行状态\n' +
-        '• /help — 显示帮助\n\n' +
-        '系统按配置的 Cron 表达式自动运行。',
-        chatId
-      );
-    } else {
-      await sendText(`不太明白「${text}」，发送 /help 查看支持的指令。`, chatId);
+    if (!_agent) {
+      await sendText('⚠️ Agent 未初始化', chatId);
+      return;
+    }
+
+    // 交给 Agent 处理
+    const response = await _agent.run(text, {
+      sessionId: chatId,
+      platform: 'feishu',
+    });
+
+    if (response.reply) {
+      const maxLen = 4000;
+      const reply = response.reply.length > maxLen
+        ? response.reply.slice(0, maxLen) + '\n\n...(内容过长已截断)'
+        : response.reply;
+      await sendText(reply, chatId);
     }
   } catch (err) {
     logger.error(`事件处理异常: ${err.message}`);
@@ -140,14 +164,6 @@ async function handleMessageEvent(event) {
 }
 
 // ===== 工具函数 =====
-function readBody(req) {
-  return new Promise((resolve) => {
-    let data = '';
-    req.on('data', chunk => data += chunk);
-    req.on('end', () => resolve(data));
-  });
-}
-
 function json(res, status, body) {
   const payload = JSON.stringify(body);
   res.writeHead(status, {
@@ -160,7 +176,6 @@ function json(res, status, body) {
 function decrypt(encryptStr) {
   if (!encryptKey) return null;
   try {
-    // 飞书加密算法：AES-256-CBC，key = sha256(encryptKey)
     const key = createHash('sha256').update(encryptKey).digest();
     const buf = Buffer.from(encryptStr, 'base64');
     const iv = buf.slice(0, 16);
