@@ -174,6 +174,8 @@ const toolDefinitions = [
           keywords: article.keywords,
           imageQuery: article.imageQuery,
           style: article.style,
+          // 本地人味自检分（0-100，越高越不像 AI）。用于向用户提示是否需要人工再润色
+          humanScore: article.humanScore,
         };
       } catch (err) {
         return { success: false, error: `文章生成异常: ${err.message}` };

@@ -1,6 +1,6 @@
 {
   "name": "official-account-push",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "AI Agent 公众号内容助手：自然语言对话 → 爬取热点 → AI生成文章 → 推送公众号",
   "main": "src/main.js",
   "type": "module",
@@ -15,6 +15,7 @@
     "weibo-only": "node src/main.js --mode=once --source=weibo",
     "douyin-only": "node src/main.js --mode=once --source=douyin",
     "dev": "node --watch src/main.js --mode=web",
+    "score": "node scripts/score.js",
     "test": "node --test"
   },
   "dependencies": {

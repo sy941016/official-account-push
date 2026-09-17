@@ -102,6 +102,53 @@ test('withRetry 遇到不可重试错误立即抛出', async () => {
   assert.equal(attempts, 1, '4xx 不应重试');
 });
 
+test('withRetry 预算用尽后不再重试（超时场景的止损）', async () => {
+  // 超时（ECONNABORTED）在 isRetryableError 里算可重试，但一次超时可能就几百秒。
+  // 没有预算上限时，"600s 超时 × 4 次尝试"能把一篇文章拖到 40 分钟。
+  let attempts = 0;
+  await assert.rejects(
+    () =>
+      withRetry(
+        async () => {
+          attempts++;
+          await sleep(30);
+          throw Object.assign(new Error('timeout of 600000ms exceeded'), { code: 'ECONNABORTED' });
+        },
+        { retries: 3, baseDelayMs: 1, budgetMs: 20 }
+      ),
+    /timeout/
+  );
+  assert.equal(attempts, 1, '一次尝试就超出预算，不应再重试');
+});
+
+test('withRetry 预算充足时照常重试', async () => {
+  let attempts = 0;
+  const result = await withRetry(
+    async () => {
+      attempts++;
+      if (attempts < 3) throw Object.assign(new Error('boom'), { code: 'ECONNRESET' });
+      return 'ok';
+    },
+    { retries: 3, baseDelayMs: 1, budgetMs: 60_000 }
+  );
+  assert.equal(result, 'ok');
+  assert.equal(attempts, 3);
+});
+
+test('withRetry 的预算不拦第一次尝试', async () => {
+  // 预算为 0 也必须允许跑第一次——否则调用方会拿到一个"没试过就失败"的结果。
+  let attempts = 0;
+  const result = await withRetry(
+    async () => {
+      attempts++;
+      return 'first-try-ok';
+    },
+    { retries: 3, baseDelayMs: 1, budgetMs: 0 }
+  );
+  assert.equal(result, 'first-try-ok');
+  assert.equal(attempts, 1);
+});
+
 test('localDateKey 输出 YYYY-MM-DD', () => {
   assert.match(localDateKey(new Date(2026, 0, 5)), /^2026-01-05$/);
 });

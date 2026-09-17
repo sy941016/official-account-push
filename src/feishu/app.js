@@ -63,7 +63,7 @@ export const sendText = (text, cid = chatId) =>
   sendMessage(cid, 'text', { text });
 
 // ===== 文章发布通知卡片 =====
-export async function sendArticleCard({ topicTitle, articleTitle, digest, source, rank, draftId, style }, cid = chatId) {
+export async function sendArticleCard({ topicTitle, articleTitle, digest, source, rank, draftId, style, humanScore }, cid = chatId) {
   const sourceEmoji = source === 'weibo' ? '🔥' : '🎵';
   const sourceName = source === 'weibo' ? '微博热搜' : '抖音热点';
   const styleEmoji = style === 'jaychou' ? '🎵' : '📰';
@@ -92,6 +92,14 @@ export async function sendArticleCard({ topicTitle, articleTitle, digest, source
         fields: [
           { is_short: true, text: { tag: 'lark_md', content: `**草稿ID**\n\`${draftId || '生成中...'}\`` } },
           { is_short: true, text: { tag: 'lark_md', content: `**文章风格**\n${styleEmoji} ${styleName}` } },
+          {
+            is_short: true,
+            text: {
+              tag: 'lark_md',
+              // 本地人味自检分，仅供参考（不等于检测平台结果）；偏低时建议人工再润色
+              content: `**人味分**\n${typeof humanScore === 'number' ? `${humanScore} / 100` : '—'}`,
+            },
+          },
         ],
       },
       {

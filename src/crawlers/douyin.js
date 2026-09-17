@@ -126,7 +126,9 @@ async function fetchFromTenApi(topN) {
         viralLabel: '',
         rank,
         category: '抖音热点',
-        summary: `抖音热搜第${rank}位：${item.title}（${formatHot(hotValue)}次讨论）`,
+        // 只留热度。标题和排名都已经在提示词的【标题】【来源】两行里了，
+        // 在这里再抄一遍，模型会把它当成"需要展开的背景"——那正是要避免的。
+        summary: `${formatHot(hotValue)}次讨论`,
         source: 'douyin',
       };
     });
@@ -167,7 +169,8 @@ function parseWordList(items, topN) {
       viralLabel,
       rank,
       category: '抖音热点',
-      summary: `${labelTag}抖音热搜第${rank}位：${item.title}（${formatHot(item.hotValue)}次讨论）`,
+      // 同上一处：不重复标题与排名，只留热度这个新信息
+      summary: `${labelTag}${formatHot(item.hotValue)}次讨论`,
       source: 'douyin',
     };
   });

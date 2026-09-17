@@ -57,7 +57,10 @@ export function assertProviderReady(provider = config.ai.provider) {
  * @param {Array}  [params.tools]     OpenAI 格式工具定义，不传则不带工具
  * @param {number} [params.temperature=0.7]
  * @param {number} [params.maxTokens=4096]
+ * @param {number} [params.frequencyPenalty=0]  -2~2，压低高频词重复率（仅 openai / doubao 生效）
+ * @param {number} [params.presencePenalty=0]   -2~2，鼓励引入新词（仅 openai / doubao 生效）
  * @returns {Promise<{content: string, toolCalls: Array|null}>}
+ * @throws 输出被 max_tokens 截断时抛错（`err.truncated === true`，不可重试）
  */
 export async function chat({
   system,
@@ -65,17 +68,45 @@ export async function chat({
   tools,
   temperature = 0.7,
   maxTokens = 4096,
+  frequencyPenalty = 0,
+  presencePenalty = 0,
 }) {
   const provider = config.ai.provider;
   assertProviderReady(provider);
 
-  if (provider === 'claude') return callClaude({ system, messages, tools, temperature, maxTokens });
-  if (provider === 'doubao') return callDoubao({ system, messages, tools, temperature, maxTokens });
-  return callOpenAI({ system, messages, tools, temperature, maxTokens });
+  const params = { system, messages, tools, temperature, maxTokens, frequencyPenalty, presencePenalty };
+
+  if (provider === 'claude') return callClaude(params);
+  if (provider === 'doubao') return callDoubao(params);
+  return callOpenAI(params);
+}
+
+/**
+ * 检查响应是否被 max_tokens 截断，被截断就抛错。
+ *
+ * 为什么必须查这个：截断时返回的 JSON 一定是残缺的，解析会失败并落到容错解析分支，
+ * 结果就是**一篇写到一半的文章照样推进草稿箱**，全程不报错。
+ * 宁可明确失败让上层跳过这条选题，也别发半成品出去。
+ *
+ * 推理模型（如 doubao-seed-evolving）要特别注意：reasoning_tokens 也计入 max_tokens，
+ * 思维链越长，留给正文的额度越少。
+ *
+ * 抛出的错误故意不带 status / code —— withRetry 的 isRetryableError 会判为不可重试。
+ * 参数没变，重试只会再截断一次，白白多等几分钟。
+ */
+function assertNotTruncated(finishReason, maxTokens) {
+  if (finishReason !== 'length' && finishReason !== 'max_tokens') return;
+
+  const err = new Error(
+    `模型输出被截断（max_tokens=${maxTokens} 不够用）。` +
+      `推理模型的 reasoning_tokens 同样占用这个额度，请调大 ARTICLE_MAX_TOKENS。`
+  );
+  err.truncated = true;
+  throw err;
 }
 
 // ===== OpenAI =====
-async function callOpenAI({ system, messages, tools, temperature, maxTokens }) {
+async function callOpenAI({ system, messages, tools, temperature, maxTokens, frequencyPenalty, presencePenalty }) {
   const client = await getOpenAIClient();
   const res = await client.chat.completions.create({
     model: config.ai.openaiModel,
@@ -83,13 +114,16 @@ async function callOpenAI({ system, messages, tools, temperature, maxTokens }) {
     ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
     max_tokens: maxTokens,
     temperature,
+    frequency_penalty: frequencyPenalty,
+    presence_penalty: presencePenalty,
   });
-  const msg = res.choices?.[0]?.message;
-  return { content: msg?.content || '', toolCalls: msg?.tool_calls || null };
+  const choice = res.choices?.[0];
+  assertNotTruncated(choice?.finish_reason, maxTokens);
+  return { content: choice?.message?.content || '', toolCalls: choice?.message?.tool_calls || null };
 }
 
 // ===== 豆包（OpenAI 兼容协议）=====
-async function callDoubao({ system, messages, tools, temperature, maxTokens }) {
+async function callDoubao({ system, messages, tools, temperature, maxTokens, frequencyPenalty, presencePenalty }) {
   // 只有豆包走裸 axios，其他 provider 不必为它付出加载成本
   const { default: axios } = await import('axios');
 
@@ -101,6 +135,8 @@ async function callDoubao({ system, messages, tools, temperature, maxTokens }) {
       ...(tools?.length ? { tools, tool_choice: 'auto' } : {}),
       max_tokens: maxTokens,
       temperature,
+      frequency_penalty: frequencyPenalty,
+      presence_penalty: presencePenalty,
     },
     {
       headers: {
@@ -110,8 +146,9 @@ async function callDoubao({ system, messages, tools, temperature, maxTokens }) {
       timeout: config.ai.requestTimeoutMs,
     }
   );
-  const msg = res.data?.choices?.[0]?.message;
-  return { content: msg?.content || '', toolCalls: msg?.tool_calls || null };
+  const choice = res.data?.choices?.[0];
+  assertNotTruncated(choice?.finish_reason, maxTokens);
+  return { content: choice?.message?.content || '', toolCalls: choice?.message?.tool_calls || null };
 }
 
 // ===== Claude =====
@@ -129,6 +166,7 @@ async function callClaude({ system, messages, tools, temperature, maxTokens }) {
     messages: toClaudeMessages(messages),
   });
 
+  assertNotTruncated(res?.stop_reason, maxTokens);
   return normalizeClaudeResponse(res);
 }
 

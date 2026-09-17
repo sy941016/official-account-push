@@ -213,6 +213,12 @@ async function processTopic(topic, { dryRun = false } = {}) {
     return { generated: false, published: false };
   }
   logger.info(`  ✓ 标题: ${article.title}`);
+  // 人味分低了说明模型这版写得还是"太 AI"，值得人工再润色一遍再发
+  if (typeof article.humanScore === 'number') {
+    const threshold = config.articleStyle?.minHumanScore ?? 70;
+    const mark = article.humanScore >= threshold ? '✓' : '⚠️';
+    logger.info(`  ${mark} 人味自检: ${article.humanScore} 分（阈值 ${threshold}）`);
+  }
 
   // 推送草稿
   let draftId = null;
@@ -247,6 +253,7 @@ async function processTopic(topic, { dryRun = false } = {}) {
         rank: topic.rank,
         draftId,
         style: article.style || config.articleStyle?.style || 'default',
+        humanScore: article.humanScore,
       });
       logger.info('  ✓ 飞书通知已发送');
     } catch (err) {

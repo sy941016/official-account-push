@@ -38,6 +38,10 @@ export const config = {
     // 单次 LLM 请求超时（毫秒）与失败重试次数
     requestTimeoutMs: int(process.env.AI_REQUEST_TIMEOUT_MS, 180_000),
     maxRetries: int(process.env.AI_MAX_RETRIES, 3),
+    // 采样惩罚：压低高频"保险用词"的重复率，是降低文本可预测性最直接的两个旋钮。
+    // Claude 协议不支持这两个参数，只有 openai / doubao 会带上。
+    frequencyPenalty: num(process.env.AI_FREQUENCY_PENALTY, 0.4),
+    presencePenalty: num(process.env.AI_PRESENCE_PENALTY, 0.3),
   },
 
   // 微信公众号
@@ -95,7 +99,8 @@ export const config = {
     // 两条话题之间的间隔，避免触发平台频控
     topicIntervalMs: num(process.env.TOPIC_INTERVAL_SECONDS, 5) * 1000,
     localServerPort: int(process.env.LOCAL_SERVER_PORT, 8080),
-    logLevel: process.env.LOG_LEVEL || 'info',
+    // 注意：日志级别在 log.level，不在这个段里。曾经这里放过一个 run.logLevel，
+    // 但没有任何代码读它，改它不会有任何效果（同一个 LOG_LEVEL 环境变量已经由 log.level 消费）。
     // HTTP 请求体大小上限（字节），防止内存被撑爆
     maxBodyBytes: int(process.env.MAX_BODY_BYTES, 1_000_000),
   },
@@ -124,6 +129,22 @@ export const config = {
   articleStyle: {
     // 可选风格: 'default' | 'jaychou'
     style: process.env.ARTICLE_STYLE || 'default',
+    // 采样温度。反 AI 检测靠的是句式多样性，温度太低会让表达更"标准"、更像 AI
+    temperature: num(process.env.ARTICLE_TEMPERATURE, 0.9),
+    // 单次生成的最大输出 token。文章越长（含内联样式 HTML）越容易截断
+    maxTokens: int(process.env.ARTICLE_MAX_TOKENS, 4096),
+    // 生成后是否做"去 AI 味"后处理（套话替换 + 长段落打散）
+    humanize: bool(process.env.ARTICLE_HUMANIZE, true),
+    // 人味自检分低于该值时带反馈重写；设为 0 则从不重写
+    minHumanScore: int(process.env.ARTICLE_MIN_HUMAN_SCORE, 70),
+    // 最多重写几轮。每轮都要重新调一次模型，是唯一的额外成本
+    rewriteRounds: int(process.env.ARTICLE_REWRITE_ROUNDS, 1),
+    // 单篇文章的**总**时间预算（毫秒），覆盖"重试 + 重写轮次"全部环节。
+    // 存在的理由：AI_REQUEST_TIMEOUT_MS 只是**单次请求**超时，它 ×(重试次数+1)×(重写轮次+1)
+    // 才是单篇的最坏耗时——默认 600s 时这个乘积是 80 分钟，而调度周期只有 12 小时、
+    // 流水线还是串行的，一篇文章卡住会把后面全部挤掉。
+    // 有了总预算，无论超时/重试/重写怎么叠加，单篇都不会超过这个数。
+    totalBudgetMs: int(process.env.ARTICLE_TOTAL_BUDGET_MS, 600_000),
   },
 
   // 通用请求头
@@ -138,7 +159,6 @@ export const config = {
   // 缓存文件（绝对路径，与启动目录无关）
   cacheFile: fromRoot(process.env.CACHE_FILE || '.cache/processed_topics.json'),
   tokenCacheFile: fromRoot(process.env.WECHAT_TOKEN_CACHE_FILE || '.cache/wechat_token.json'),
-  imageCacheDir: fromRoot('.cache/images'),
 };
 
 const VALID_PROVIDERS = ['claude', 'openai', 'doubao'];
@@ -191,6 +211,33 @@ export function validateConfig() {
   if (!VALID_STYLES.includes(config.articleStyle.style)) {
     warnings.push(`ARTICLE_STYLE 无效: "${config.articleStyle.style}"，回退为 default`);
     config.articleStyle.style = 'default';
+  }
+
+  // 采样参数越界会被模型接口直接拒掉，这里提前夹到合法区间
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+  if (config.articleStyle.temperature < 0 || config.articleStyle.temperature > 2) {
+    warnings.push(`ARTICLE_TEMPERATURE 应在 0-2 之间，已夹到区间内`);
+    config.articleStyle.temperature = clamp(config.articleStyle.temperature, 0, 2);
+  }
+  if (config.ai.frequencyPenalty < -2 || config.ai.frequencyPenalty > 2) {
+    warnings.push('AI_FREQUENCY_PENALTY 应在 -2 到 2 之间，已夹到区间内');
+    config.ai.frequencyPenalty = clamp(config.ai.frequencyPenalty, -2, 2);
+  }
+  if (config.ai.presencePenalty < -2 || config.ai.presencePenalty > 2) {
+    warnings.push('AI_PRESENCE_PENALTY 应在 -2 到 2 之间，已夹到区间内');
+    config.ai.presencePenalty = clamp(config.ai.presencePenalty, -2, 2);
+  }
+  if (config.articleStyle.minHumanScore < 0 || config.articleStyle.minHumanScore > 100) {
+    warnings.push('ARTICLE_MIN_HUMAN_SCORE 应在 0-100 之间，已夹到区间内');
+    config.articleStyle.minHumanScore = clamp(config.articleStyle.minHumanScore, 0, 100);
+  }
+  if (config.articleStyle.rewriteRounds < 0) {
+    warnings.push('ARTICLE_REWRITE_ROUNDS 不能为负，已回退为 0');
+    config.articleStyle.rewriteRounds = 0;
+  }
+  if (config.articleStyle.maxTokens < 1024) {
+    warnings.push('ARTICLE_MAX_TOKENS 过小（< 1024），可能写不完一篇带排版的文章，已提升为 1024');
+    config.articleStyle.maxTokens = 1024;
   }
 
   if (config.run.topicsPerRun < 1) {

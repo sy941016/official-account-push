@@ -33,6 +33,20 @@ const WEIBO_OFFICIAL_BODY = {
   },
 };
 
+// 回归夹具：微博官方接口的 note 字段实测**就是标题本身**（连测 51 条，51/51 与 word 逐字相同）。
+// 这里把四种形态都摆出来，钉住"摘要不能变成标题的副本"。
+const WEIBO_NOTE_DUP_BODY = {
+  data: {
+    realtime: [
+      { word: 'note与标题逐字相同', num: 600_000, label_name: '沸', note: 'note与标题逐字相同' },
+      { word: 'note只多一个标签前缀', num: 700_000, label_name: '新', note: '【新】note只多一个标签前缀' },
+      // 这条的 note 真带来了标题之外的信息 —— 必须保留，别为了去重把有用的也丢了
+      { word: '某地突发暴雨', num: 1_200_000, label_name: '爆', note: '<b>暴雨</b>导致多地积水' },
+      { word: '既没有note也没有标签', num: 300_000 },
+    ],
+  },
+};
+
 const WEIBO_TENAPI_BODY = {
   code: 200,
   data: [
@@ -65,6 +79,7 @@ const DOUYIN_MOBILE_BODY = {
 
 const ROUTES = {
   '/weibo-official': () => ({ type: 'application/json', body: JSON.stringify(WEIBO_OFFICIAL_BODY) }),
+  '/weibo-note-dup': () => ({ type: 'application/json', body: JSON.stringify(WEIBO_NOTE_DUP_BODY) }),
   '/weibo-tenapi': () => ({ type: 'application/json', body: JSON.stringify(WEIBO_TENAPI_BODY) }),
   '/weibo-backup': () => ({ type: 'text/html; charset=utf-8', body: WEIBO_BACKUP_HTML }),
   '/douyin-web': () => ({ type: 'application/json', body: JSON.stringify(DOUYIN_WEB_BODY) }),
@@ -157,6 +172,40 @@ test('微博官方 API：正常解析、过滤广告、排名不跳号、清洗 
   assert.ok(first.viralScore > topics[2].viralScore, '带"爆"标签的分数应显著高于普通条目');
 });
 
+// 背景信息为空的后果比"少一点上下文"严重得多：提示词里【背景】和【标题】是同一句话，
+// 模型等于在零信息下写作，只能靠猜——实测微博官方接口 51/51 条都是这样。
+test('微博官方 API：note 只是标题的副本时，摘要不能重复标题', async () => {
+  config.crawler.weiboUrl = `${mock.base}/weibo-note-dup`;
+  const { getWeiboHot } = await import('../src/crawlers/weibo.js');
+
+  const topics = await getWeiboHot(10);
+  assert.equal(topics.length, 4, '这四条都不该被广告过滤掉');
+
+  const [identical, prefixOnly, informative, noNote] = topics;
+
+  // ① note 与标题逐字相同
+  assert.equal(identical.title, 'note与标题逐字相同');
+  assert.ok(
+    !identical.summary.includes(identical.title),
+    `摘要不该把标题再抄一遍，实际拿到：${identical.summary}`
+  );
+  assert.ok(identical.summary.includes('60.0万'), '退回热度后应带上热度数字');
+
+  // ② note 只是标题加了个【】前缀：形态不同，但同样没有新信息
+  assert.ok(
+    !prefixOnly.summary.includes(prefixOnly.title),
+    `带【】前缀的副本同样要判成"没有新信息"，实际：${prefixOnly.summary}`
+  );
+  assert.ok(prefixOnly.summary.includes('70.0万'));
+
+  // ③ 真有信息量的 note 必须保留（别为了去重把有用的也丢掉）
+  assert.ok(informative.summary.includes('暴雨导致多地积水'), '有信息量的 note 应保留');
+  assert.ok(!informative.summary.includes('<b>'), 'note 里的 HTML 应被清洗');
+
+  // ④ 既没有 note 也没有标签
+  assert.equal(noNote.summary, '热度 30.0万');
+});
+
 test('微博降级：官方接口失败时回退到第三方接口', async () => {
   // weiboUrl 保持 beforeEach 给的 404，只把第三方接口指向 mock
   config.crawler.weiboFallbackUrl = `${mock.base}/weibo-tenapi`;
@@ -167,6 +216,7 @@ test('微博降级：官方接口失败时回退到第三方接口', async () =>
   assert.deepEqual(topics.map((t) => t.title), ['第三方热点一', '第三方热点二'], '广告词条应被过滤');
   assert.deepEqual(topics.map((t) => t.rank), [1, 2]);
   assert.equal(topics[0].hotValue, 1_234_567, '字符串热度应转成数字');
+  assert.equal(topics[0].summary, '热度 123.5万', '第三方接口只有热度是新信息，别把标题和排名再抄一遍');
 });
 
 test('微博降级：官方与第三方都失败时用网页解析兜底', async () => {
@@ -177,6 +227,10 @@ test('微博降级：官方与第三方都失败时用网页解析兜底', async
 
   assert.deepEqual(topics.map((t) => t.title), ['网页热点一', '网页热点二']);
   assert.deepEqual(topics.map((t) => t.rank), [1, 2]);
+  assert.ok(
+    topics.every((t) => t.summary === ''),
+    '网页兜底拿不到任何背景，应给空串，由提示词模板决定整行不输出'
+  );
 });
 
 test('微博三级兜底全部失败时返回空数组，而不是抛错', async () => {
@@ -202,7 +256,7 @@ test('抖音 Web API：正常解析、label_type 映射成爆点标签、排名�
   assert.deepEqual(topics.map((t) => t.viralLabel), ['爆', '新'], 'label_type 5→爆、4→新');
   assert.ok(topics.every((t) => t.source === 'douyin'));
   assert.equal(topics[0].hotValue, 5_000_000);
-  assert.ok(topics[0].summary.includes('【爆】'));
+  assert.equal(topics[0].summary, '【爆】500.0万次讨论', '抖音摘要同样不该重复标题与排名');
 });
 
 test('抖音降级：Web API 失败时回退到移动端接口', async () => {

@@ -22,6 +22,7 @@ export const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
  * @param {number} [options.maxDelayMs=15000]
  * @param {string} [options.label='任务']    日志中显示的名称
  * @param {(err:any)=>boolean} [options.shouldRetry]
+ * @param {number} [options.budgetMs=Infinity] 重试总预算（毫秒），超过后不再发起新的重试
  * @returns {Promise<T>}
  */
 export async function withRetry(fn, options = {}) {
@@ -31,10 +32,20 @@ export async function withRetry(fn, options = {}) {
     maxDelayMs = 15_000,
     label = '任务',
     shouldRetry = isRetryableError,
+    budgetMs = Infinity,
   } = options;
 
+  const startedAt = Date.now();
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
+    // 预算用尽就不再发起新的重试。这一条是专门为**超时**加的：
+    // timeout 在 isRetryableError 里算可重试（单次超时确实常常是抖动，重试能救回来），
+    // 但一次超时可能就吃掉几百秒，重试 3 次能把一篇文章拖到 40 分钟以上。
+    // 预算到顶就止损，把决定权交回调用方，而不是让重试一直占着调度窗口。
+    if (attempt > 0 && Date.now() - startedAt >= budgetMs) {
+      logger.warn(`${label} 重试预算 ${Math.round(budgetMs / 1000)}s 已用尽，不再重试`);
+      throw lastErr;
+    }
     try {
       return await fn();
     } catch (err) {
