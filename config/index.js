@@ -112,6 +112,14 @@ export const config = {
     webPort: int(process.env.AGENT_WEB_PORT, 3000), // Web 聊天服务端口
     webCorsOrigin: process.env.WEB_CORS_ORIGIN || '*', // Web 允许的跨域来源
     webAccessToken: process.env.WEB_ACCESS_TOKEN || '', // 留空则不校验
+    // Web 登录页账号密码。两者**同时**配置才启用登录；都为空则直接进助手页（与加登录前一致）
+    webLoginUser: process.env.WEB_LOGIN_USER || '',
+    webLoginPassword: process.env.WEB_LOGIN_PASSWORD || '',
+    // 会话 cookie 的签名密钥。留空则由账号密码派生 —— 省掉一个要保管的密钥，
+    // 且改密码会自动让旧会话失效；对外暴露服务时建议显式配置。
+    webSessionSecret: process.env.WEB_SESSION_SECRET || '',
+    // 登录有效期（小时）。下限 5 分钟，避免误配成 0 导致刚登录就掉线
+    webSessionTtlMs: Math.max(5 * 60_000, num(process.env.WEB_SESSION_TTL_HOURS, 12) * 3600_000),
     // 单条工具结果写入对话记忆时的截断长度，避免上下文膨胀
     maxToolResultChars: int(process.env.AGENT_MAX_TOOL_RESULT_CHARS, 8_000),
   },
@@ -259,6 +267,12 @@ export function validateConfig() {
   if (!config.wechat.appId) warnings.push('微信公众号未配置，将跳过草稿发布');
   if (!config.feishu.appId) warnings.push('飞书未配置，将跳过飞书通知与机器人');
   if (!config.crawler.weiboCookie) warnings.push('WEIBO_COOKIE 未配置，微博爬取成功率可能偏低');
+
+  // 登录页只配一半等于没配（isLoginEnabled 要求两者同时存在），这种"设置了但没生效"
+  // 不报错不警告，只能靠这里点出来
+  if (Boolean(config.agent.webLoginUser) !== Boolean(config.agent.webLoginPassword)) {
+    warnings.push('WEB_LOGIN_USER / WEB_LOGIN_PASSWORD 只配了一个，登录页不会启用（需同时配置）');
+  }
 
   // 配图：配置不完整只降级，不算错误——不能因为图库没配好就发不出文章
   if (!VALID_IMAGE_PROVIDERS.includes(config.image.provider)) {

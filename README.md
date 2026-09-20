@@ -62,6 +62,22 @@ npm test
 
 底部有快捷按钮：「看看今天热点」「生成爆款文章」「周杰伦风格」「系统状态」。
 
+**登录页**：在 `.env` 里配好 `WEB_LOGIN_USER` / `WEB_LOGIN_PASSWORD` 后，访问任何页面都会先跳到
+`/login`；登录成功才进入助手页，顶栏会显示当前账号并提供「退出登录」。
+两个变量**都留空则不启用登录**，行为与加登录之前完全一致。
+
+几个实现细节，排查时用得上：
+
+- 会话是一枚签名 cookie（`oap_session`，HttpOnly + SameSite=Lax），**没有引入任何新依赖**；
+  payload 里只有用户名和过期时间，不含密码。有效期由 `WEB_SESSION_TTL_HOURS` 控制（默认 12 小时）。
+- 勾掉「记住我」下发的是**会话 cookie**（关掉浏览器即失效），勾上才带 `Max-Age`。
+- 登录失败按来源 IP 限流：5 分钟内错 5 次封锁 5 分钟，返回 `429`。计数在内存里，重启即清零。
+- 账号和密码只配了一个时**不会启用登录**（只打一条启动警告）——这种"设置了但没生效"不报错不警告，
+  所以特意在 `validateConfig()` 里点了出来。
+- 改完 `WEB_LOGIN_*` **必须重启服务**：配置是模块加载时读的，老进程会静默沿用旧账号密码。
+- 接口未登录时返回 `401` 且响应体带 `loginRequired: true`，前端据此跳登录页；
+  这和 `WEB_ACCESS_TOKEN` 那个 401 是两回事，别混。
+
 ### 飞书对话
 
 在飞书群里 @机器人 直接说话，无需固定指令格式。Agent 会理解你的意图并执行。
@@ -94,7 +110,9 @@ src/
     memory.js              # 对话记忆（按会话隔离，裁剪时保证工具调用配对完整）
     prompts.js             # 系统提示词
   web/
-    server.js              # Web 聊天 HTTP 服务
+    server.js              # Web 聊天 HTTP 服务（含登录路由与鉴权守卫）
+    auth.js                # 登录鉴权（签名会话 cookie、失败限流）
+    public/login.html      # 登录页
     public/index.html      # 聊天界面
   feishu/
     app.js                 # 飞书消息发送
@@ -255,6 +273,10 @@ npm run score -- article.html --json  # 输出 JSON，方便脚本消费
 | `AGENT_MAX_TOOL_RESULT_CHARS` | 单条工具结果写入上下文的截断长度 | `8000` |
 | `WEB_CORS_ORIGIN` | Web 服务允许的跨域来源 | `*` |
 | `WEB_ACCESS_TOKEN` | 设置后调用 `/api/*` 需带 `x-web-token` 头 | 空（不校验） |
+| `WEB_LOGIN_USER` | Web 登录账号，与下一项**同时**配置才启用登录页 | 空（不启用） |
+| `WEB_LOGIN_PASSWORD` | Web 登录密码 | 空（不启用） |
+| `WEB_SESSION_TTL_HOURS` | 登录有效期（小时），下限 5 分钟 | `12` |
+| `WEB_SESSION_SECRET` | 会话 cookie 签名密钥，留空则由账号密码派生 | 空 |
 | `AI_REQUEST_TIMEOUT_MS` | 单次 AI 请求超时 | `180000` |
 | `AI_MAX_RETRIES` | AI 调用失败重试次数 | `3` |
 | `CRAWLER_TIMEOUT_MS` | 爬虫请求超时 | `15000` |
@@ -355,6 +377,8 @@ npm run score -- article.html --json  # 输出 JSON，方便脚本消费
 - **`.env` 已被 `.gitignore` 忽略，请勿提交到版本库。** 如果曾经提交过，请立即在对应平台**轮换所有密钥**（仅从 Git 中移除文件并不能让已泄露的密钥失效）。
 - HTTP 回调模式（`npm run server`）请务必配置 `FEISHU_VERIFICATION_TOKEN`，否则事件接口没有鉴权保护。
 - Web 服务默认监听 `0.0.0.0`。仅本机使用时建议把 `WEB_CORS_ORIGIN` 收窄为 `http://localhost:3000`，需要暴露到局域网时再配置 `WEB_ACCESS_TOKEN`。
+- 登录页只是**一层访问控制**，不是完整的账户体系：口令明文存在 `.env` 里、没有找回流程、会话 cookie 也不带 `Secure`
+  （本地是 http，带上会被浏览器直接丢弃）。要暴露到公网，请在反向代理上加 HTTPS 并配置 `WEB_SESSION_SECRET`。
 
 ## 常见问题
 

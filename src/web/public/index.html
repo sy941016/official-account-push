@@ -4,6 +4,7 @@
 <meta charset="UTF-8" data-page-node-id="1jxnH7MWnRWJTRA1kOzhnq">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="gHVyBOm1bYleSSHTAlOhtN">
 <meta name="color-scheme" content="light dark" data-page-node-id="1tbUlNDa65viDns57fvs7V">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307c160'/%3E%3Cpath d='M25 15.5a7.4 7.4 0 0 1-8 7.4 8 8 0 0 1-2.8-.5L9 25l1.6-4.4A7.2 7.2 0 0 1 10 17.4a7.4 7.4 0 0 1 8-7.4 7.4 7.4 0 0 1 7 7.5Z' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>公众号内容助手 · AI Agent</title>
 <style>
   :root {
@@ -167,6 +168,34 @@
   }
   .btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--text-3); }
   .btn:active { transform: translateY(.5px); }
+
+  .user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    height: 32px;
+    padding: 0 12px 0 5px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    font-size: 12.5px;
+    color: var(--text-2);
+    white-space: nowrap;
+  }
+  .user-chip .avatar {
+    flex: none;
+    width: 23px;
+    height: 23px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(145deg, var(--brand), var(--brand-strong));
+    color: #fff;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+  }
+  .user-chip[hidden] { display: none; }
 
   /* ============ 对话区 ============ */
   .chat-scroll {
@@ -560,6 +589,9 @@
     .composer { padding: 0 16px; }
     .bubble-wrap { max-width: 88%; }
     .status-pill { display: none; }
+    /* 窄屏只留头像，省出横向空间给"清空会话 / 退出登录" */
+    .user-chip { padding-right: 5px; }
+    .user-chip #userName { display: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -585,7 +617,12 @@
   </div>
   <div class="topbar-actions" data-page-node-id="ud3wCCMYHxJ4ZtrWtmxISo">
     <span class="status-pill" id="connStatus" data-page-node-id="yOwNoxFYdCliaidEtDH0jU"><span class="dot" data-page-node-id="2VPcI5cMEePwFVr1SSo9J0"></span><span id="connText" data-page-node-id="Vg1wtdIuddudcWVwLuDEmj">连接中</span></span>
+    <span class="user-chip" id="userChip" hidden>
+      <span class="avatar" id="userAvatar" aria-hidden="true"></span>
+      <span id="userName"></span>
+    </span>
     <button class="btn" onclick="resetChat()" data-page-node-id="LIDuO2ABnEDZ2FzmgwNTWx">清空会话</button>
+    <button class="btn" id="logoutBtn" onclick="logout()" hidden>退出登录</button>
   </div>
 </header>
 
@@ -926,6 +963,41 @@
     document.querySelectorAll('.chip').forEach((c) => (c.disabled = busy));
   }
 
+  /* ============ 登录态 ============ */
+
+  /** 会话没了就回登录页。用 replace 是为了不在历史里留下一条"已经失效的页面" */
+  function gotoLogin() {
+    location.replace('/login');
+  }
+
+  /** 顶栏显示当前账号。服务端没启用登录时接口返回空用户名，顶栏保持原样 */
+  async function loadMe() {
+    try {
+      const res = await fetch('/api/me');
+      if (res.status === 401) return gotoLogin();
+      if (!res.ok) return;
+
+      const data = await res.json();
+      if (!data.username) return;
+
+      document.getElementById('userName').textContent = data.username;
+      document.getElementById('userAvatar').textContent = data.username.slice(0, 1);
+      document.getElementById('userChip').hidden = false;
+      document.getElementById('logoutBtn').hidden = false;
+    } catch {
+      // 取不到就当作没启用登录，不影响聊天
+    }
+  }
+
+  async function logout() {
+    try {
+      await fetch('/api/logout', { method: 'POST' });
+    } catch {
+      // 请求失败也照样回登录页；cookie 没清掉最多是多点一次
+    }
+    gotoLogin();
+  }
+
   async function sendMessage() {
     const text = messageInput.value.trim();
     if (!text || isLoading) return;
@@ -950,13 +1022,15 @@
       hideLoading();
 
       if (!res.ok) {
+        let data = null;
+        try { data = await res.json(); } catch {}
+        // 会话过期：服务端会在响应体里带 loginRequired，直接送回登录页
+        if (data?.loginRequired) return gotoLogin();
         if (res.status === 401) {
           addNotice('访问被拒绝：服务端启用了 WEB_ACCESS_TOKEN，请用 /?token=你的令牌 打开本页');
           return;
         }
-        let msg = '请求失败';
-        try { msg = (await res.json()).error || msg; } catch {}
-        addNotice('出错了：' + msg);
+        addNotice('出错了：' + (data?.error || '请求失败'));
         return;
       }
 
@@ -990,6 +1064,7 @@
         headers,
         body: JSON.stringify({ sessionId }),
       });
+      if (res.status === 401) return gotoLogin();
       if (!res.ok) throw new Error('HTTP ' + res.status);
 
       chatContainer.innerHTML = '';
@@ -1020,6 +1095,7 @@
 
   renderWelcome();
   pingHealth();
+  loadMe();
   setInterval(pingHealth, 60000);
   messageInput.focus();
 </script>

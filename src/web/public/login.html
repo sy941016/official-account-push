@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307c160'/%3E%3Cpath d='M25 15.5a7.4 7.4 0 0 1-8 7.4 8 8 0 0 1-2.8-.5L9 25l1.6-4.4A7.2 7.2 0 0 1 10 17.4a7.4 7.4 0 0 1 8-7.4 7.4 7.4 0 0 1 7 7.5Z' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<title>登录 · 公众号内容助手</title>
+<style>
+  :root {
+    --bg: #f4f6f7;
+    --surface: #ffffff;
+    --surface-2: #f6f8f9;
+    --border: #e6e8ec;
+    --border-strong: #d5d9e0;
+    --text: #0f1419;
+    --text-2: #5b6472;
+    --text-3: #98a1b0;
+    --brand: #07c160;
+    --brand-strong: #059a4c;
+    --brand-ink: #056b38;
+    --danger: #d92d20;
+    --danger-soft: #fef3f2;
+    --shadow-card: 0 24px 60px -24px rgba(16, 24, 40, .22), 0 2px 8px rgba(16, 24, 40, .05);
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+            "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0a0c10;
+      --surface: #14171d;
+      --surface-2: #1a1e26;
+      --border: #262b34;
+      --border-strong: #333a45;
+      --text: #e9ebef;
+      --text-2: #9aa3b2;
+      --text-3: #6b7482;
+      --brand: #2ecc71;
+      --brand-strong: #22b45f;
+      --brand-ink: #7ee2ab;
+      --danger: #f97066;
+      --danger-soft: #2a1616;
+      --shadow-card: 0 30px 70px -28px rgba(0, 0, 0, .85), 0 2px 10px rgba(0, 0, 0, .4);
+    }
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { height: 100%; }
+
+  body {
+    font-family: var(--font);
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  .stage { display: flex; min-height: 100%; }
+
+  /* ============ 左侧品牌区 ============ */
+  .brand-pane {
+    position: relative;
+    flex: 1 1 52%;
+    overflow: hidden;
+    background: linear-gradient(158deg, #07281d 0%, #04150f 46%, #030a08 100%);
+    display: flex;
+    isolation: isolate;
+  }
+
+  .aurora { position: absolute; inset: -20%; z-index: 0; }
+  .blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: .5;
+  }
+  .blob.b1 {
+    width: 46%; padding-bottom: 46%;
+    top: 4%; left: 6%;
+    background: radial-gradient(circle, #07c160 0%, rgba(7, 193, 96, 0) 68%);
+    animation: drift1 22s ease-in-out infinite;
+  }
+  .blob.b2 {
+    width: 40%; padding-bottom: 40%;
+    bottom: 2%; right: 2%;
+    background: radial-gradient(circle, #12a3a3 0%, rgba(18, 163, 163, 0) 70%);
+    opacity: .38;
+    animation: drift2 27s ease-in-out infinite;
+  }
+  .blob.b3 {
+    width: 30%; padding-bottom: 30%;
+    top: 46%; left: 40%;
+    background: radial-gradient(circle, #4ade80 0%, rgba(74, 222, 128, 0) 72%);
+    opacity: .26;
+    animation: drift3 19s ease-in-out infinite;
+  }
+
+  @keyframes drift1 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50%      { transform: translate3d(6%, 8%, 0) scale(1.12); }
+  }
+  @keyframes drift2 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+    50%      { transform: translate3d(-8%, -6%, 0) scale(1.16); }
+  }
+  @keyframes drift3 {
+    0%, 100% { transform: translate3d(0, 0, 0) scale(1); opacity: .26; }
+    50%      { transform: translate3d(-5%, 7%, 0) scale(1.2); opacity: .36; }
+  }
+
+  .grid-lines {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background-image:
+      linear-gradient(rgba(255, 255, 255, .05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255, 255, 255, .05) 1px, transparent 1px);
+    background-size: 46px 46px;
+    -webkit-mask-image: radial-gradient(ellipse 78% 66% at 32% 42%, #000 0%, transparent 72%);
+    mask-image: radial-gradient(ellipse 78% 66% at 32% 42%, #000 0%, transparent 72%);
+  }
+
+  .brand-pane-inner {
+    position: relative;
+    z-index: 2;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    /* 只剩品牌标识和主文案两个子元素，用 flex-start + 主文案自撑高度来垂直居中，
+       比 space-between 更稳（不会把文案顶到最底部） */
+    justify-content: flex-start;
+    gap: 40px;
+    padding: 44px 56px 40px;
+    color: #eaf3ee;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    flex: none;
+    width: 40px;
+    height: 40px;
+    border-radius: 12px;
+    background: linear-gradient(145deg, #0fd474, #049c4b);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    box-shadow: 0 8px 22px -8px rgba(7, 193, 96, .85);
+  }
+  .brand-name { display: flex; flex-direction: column; line-height: 1.35; }
+  .brand-name strong { font-size: 15px; font-weight: 600; letter-spacing: .01em; }
+  .brand-name span { font-size: 11.5px; color: rgba(234, 243, 238, .5); letter-spacing: .06em; }
+
+  /* 主文案撑满剩余高度并整体居中，视觉重心落在品牌标识下方 */
+  .pitch {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    max-width: 460px;
+  }
+  .eyebrow {
+    font-size: 11px;
+    letter-spacing: .18em;
+    color: rgba(126, 226, 171, .75);
+    margin-bottom: 18px;
+  }
+  .pitch h1 {
+    font-size: clamp(28px, 2.5vw, 38px);
+    font-weight: 650;
+    line-height: 1.28;
+    letter-spacing: -.015em;
+    margin-bottom: 16px;
+  }
+  .pitch h1 .hl {
+    background: linear-gradient(100deg, #34e08a, #0fd474 55%, #7ee2ab);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .pitch-sub {
+    font-size: 14px;
+    color: rgba(234, 243, 238, .62);
+    max-width: 400px;
+    margin-bottom: 30px;
+  }
+
+  .features { list-style: none; display: flex; flex-direction: column; gap: 14px; }
+  .features li {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 13.5px;
+    color: rgba(234, 243, 238, .82);
+  }
+  .features .ico {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 9px;
+    display: grid;
+    place-items: center;
+    background: rgba(255, 255, 255, .06);
+    border: 1px solid rgba(255, 255, 255, .1);
+    color: #4ee08d;
+  }
+  .features .ico svg { width: 14px; height: 14px; }
+
+  /* ============ 右侧表单区 ============ */
+  .form-pane {
+    flex: 1 1 48%;
+    display: grid;
+    place-items: center;
+    padding: 48px 32px;
+    background:
+      radial-gradient(ellipse 70% 55% at 78% 12%, color-mix(in srgb, var(--brand) 7%, transparent), transparent 70%),
+      var(--bg);
+  }
+
+  .card {
+    width: 100%;
+    max-width: 396px;
+    padding: 34px 34px 26px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+    animation: riseIn .45s cubic-bezier(.22, .68, .32, 1) both;
+  }
+
+  /* 窄屏没有左侧品牌区，用一行紧凑标识补回品牌感 */
+  .mobile-brand { display: none; }
+
+  @keyframes riseIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+  .brand-pane-inner > * { animation: riseIn .5s cubic-bezier(.22, .68, .32, 1) both; }
+  .brand-pane-inner > *:nth-child(2) { animation-delay: .07s; }
+  @media (prefers-color-scheme: dark) {
+    .card { background-image: linear-gradient(180deg, rgba(255, 255, 255, .035), transparent 42%); }
+  }
+
+  .card-head { margin-bottom: 26px; }
+  .card-head h2 {
+    font-size: 23px;
+    font-weight: 650;
+    letter-spacing: -.015em;
+    margin-bottom: 6px;
+  }
+  .card-head p { font-size: 13px; color: var(--text-2); }
+
+  .field { margin-bottom: 16px; }
+  .field label {
+    display: block;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--text-2);
+    margin-bottom: 7px;
+  }
+
+  .control {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 46px;
+    padding: 0 13px;
+    border-radius: 11px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-strong);
+    transition: border-color .16s, box-shadow .16s, background .16s;
+  }
+  .control:hover { border-color: var(--text-3); }
+  .control:focus-within {
+    border-color: var(--brand);
+    background: var(--surface);
+    box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--brand) 16%, transparent);
+  }
+  .control .ico { flex: none; color: var(--text-3); display: grid; place-items: center; transition: color .16s; }
+  .control:focus-within .ico { color: var(--brand); }
+  .control .ico svg { width: 16px; height: 16px; }
+
+  .control input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: 0;
+    outline: none;
+    background: none;
+    font: inherit;
+    font-size: 14px;
+    color: var(--text);
+  }
+  .control input::placeholder { color: var(--text-3); }
+  .control input:-webkit-autofill {
+    -webkit-box-shadow: 0 0 0 40px var(--surface-2) inset;
+    -webkit-text-fill-color: var(--text);
+  }
+
+  .peek {
+    flex: none;
+    width: 28px;
+    height: 28px;
+    display: grid;
+    place-items: center;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-3);
+    cursor: pointer;
+    transition: color .16s, background .16s;
+  }
+  .peek:hover { color: var(--text-2); background: color-mix(in srgb, var(--text-3) 14%, transparent); }
+  .peek svg { width: 16px; height: 16px; }
+  .peek .eye-off { display: none; }
+  .peek.is-on .eye-on { display: none; }
+  .peek.is-on .eye-off { display: block; }
+
+  .row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 4px 0 20px;
+  }
+
+  .check { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+  .check input { position: absolute; opacity: 0; width: 0; height: 0; }
+  .check .box {
+    flex: none;
+    width: 17px;
+    height: 17px;
+    border-radius: 5px;
+    border: 1.5px solid var(--border-strong);
+    display: grid;
+    place-items: center;
+    color: #fff;
+    transition: background .15s, border-color .15s;
+  }
+  .check .box svg { width: 11px; height: 11px; opacity: 0; transition: opacity .15s; }
+  .check input:checked + .box {
+    background: linear-gradient(140deg, var(--brand), var(--brand-strong));
+    border-color: transparent;
+  }
+  .check input:checked + .box svg { opacity: 1; }
+  .check input:focus-visible + .box { box-shadow: 0 0 0 3.5px color-mix(in srgb, var(--brand) 18%, transparent); }
+  .check span:last-child { font-size: 13px; color: var(--text-2); }
+
+  .hint { font-size: 12px; color: var(--text-3); }
+
+  .alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 9px;
+    padding: 10px 12px;
+    margin-bottom: 16px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+    background: var(--danger-soft);
+    color: var(--danger);
+    border: 1px solid color-mix(in srgb, var(--danger) 26%, transparent);
+    animation: shake .4s cubic-bezier(.36, .07, .19, .97);
+  }
+  .alert[hidden] { display: none; }
+  .alert svg { flex: none; width: 15px; height: 15px; margin-top: 2px; }
+
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20%      { transform: translateX(-6px); }
+    40%      { transform: translateX(5px); }
+    60%      { transform: translateX(-3px); }
+    80%      { transform: translateX(2px); }
+  }
+
+  .submit {
+    position: relative;
+    width: 100%;
+    height: 46px;
+    border: 0;
+    border-radius: 11px;
+    display: grid;
+    place-items: center;
+    background: linear-gradient(135deg, var(--brand), var(--brand-strong));
+    color: #fff;
+    font: inherit;
+    font-size: 14.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+    cursor: pointer;
+    box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--brand) 78%, transparent);
+    transition: filter .16s, box-shadow .2s, transform .12s;
+  }
+  .submit:hover:not([disabled]) {
+    filter: brightness(1.06);
+    box-shadow: 0 14px 30px -10px color-mix(in srgb, var(--brand) 82%, transparent);
+  }
+  .submit:active:not([disabled]) { transform: translateY(1px); }
+  .submit[disabled] { cursor: not-allowed; filter: saturate(.75) brightness(.94); }
+  .submit .label { transition: opacity .15s; }
+  .submit .spinner {
+    position: absolute;
+    width: 17px;
+    height: 17px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, .35);
+    border-top-color: #fff;
+    opacity: 0;
+    animation: spin .7s linear infinite;
+  }
+  .submit.is-loading .spinner { opacity: 1; }
+  .submit.is-loading .label { opacity: 0; }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .card-foot {
+    margin-top: 22px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px;
+    color: var(--text-3);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  /* ============ 响应式 ============ */
+  @media (max-width: 900px) {
+    .brand-pane { display: none; }
+    .form-pane { flex: 1 1 100%; padding: 32px 20px; align-content: center; }
+    .card { max-width: 420px; }
+
+    .mobile-brand {
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      width: 100%;
+      max-width: 420px;
+      margin: 0 auto 18px;
+      animation: riseIn .45s cubic-bezier(.22, .68, .32, 1) both;
+    }
+    .mobile-brand .brand-mark {
+      flex: none;
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: linear-gradient(145deg, var(--brand), var(--brand-strong));
+      display: grid;
+      place-items: center;
+      color: #fff;
+      box-shadow: 0 8px 18px -8px color-mix(in srgb, var(--brand) 80%, transparent);
+    }
+    .mobile-brand .brand-mark svg { width: 17px; height: 17px; }
+    .mobile-brand .name { display: flex; flex-direction: column; line-height: 1.35; }
+    .mobile-brand strong { font-size: 14px; font-weight: 600; }
+    .mobile-brand span { font-size: 11px; color: var(--text-3); letter-spacing: .06em; }
+  }
+
+  @media (max-width: 420px) {
+    .card { padding: 26px 22px 20px; border-radius: 16px; }
+    .card-head h2 { font-size: 21px; }
+    .row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: .01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: .01ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="stage">
+
+  <aside class="brand-pane">
+    <div class="aurora" aria-hidden="true">
+      <span class="blob b1"></span>
+      <span class="blob b2"></span>
+      <span class="blob b3"></span>
+    </div>
+    <div class="grid-lines" aria-hidden="true"></div>
+
+    <div class="brand-pane-inner">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.2 9.2 0 0 1-3.2-.6L3 21l1.8-5a8.1 8.1 0 0 1-.8-3.5 8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8 8.4Z"/>
+            <path d="M8.5 11h7M8.5 14.5h4"/>
+          </svg>
+        </div>
+        <div class="brand-name">
+          <strong>公众号内容助手</strong>
+          <span>AI AGENT</span>
+        </div>
+      </div>
+
+      <div class="pitch">
+        <p class="eyebrow">HOTSPOT · WRITING · PUBLISHING</p>
+        <h1>把今天的<span class="hl">热点</span><br>写成能发出去的稿子</h1>
+        <p class="pitch-sub">从热搜采集到公众号草稿箱，一条链路跑完，中间不用再换工具。</p>
+
+        <ul class="features">
+          <li>
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/>
+              </svg>
+            </span>
+            实时抓取微博、抖音热搜榜
+          </li>
+          <li>
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 20h16M6 20V9l6-5 6 5v11"/>
+              </svg>
+            </span>
+            按指定文风成稿，自动去 AI 味
+          </li>
+          <li>
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12.5 9 17.5 20 6.5"/>
+              </svg>
+            </span>
+            配图、排版、草稿推送一次到位
+          </li>
+        </ul>
+      </div>
+    </div>
+  </aside>
+
+  <main class="form-pane">
+    <div class="mobile-brand">
+      <div class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 11.5a8.4 8.4 0 0 1-9 8.4 9.2 9.2 0 0 1-3.2-.6L3 21l1.8-5a8.1 8.1 0 0 1-.8-3.5 8.4 8.4 0 0 1 9-8.4 8.4 8.4 0 0 1 8 8.4Z"/>
+          <path d="M8.5 11h7M8.5 14.5h4"/>
+        </svg>
+      </div>
+      <div class="name">
+        <strong>公众号内容助手</strong>
+        <span>AI AGENT</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-head">
+        <h2>欢迎回来</h2>
+        <p>登录后进入公众号内容助手</p>
+      </div>
+
+      <form id="loginForm" novalidate>
+        <div class="field">
+          <label for="username">账号</label>
+          <div class="control">
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+            </span>
+            <input id="username" name="username" type="text" placeholder="请输入账号"
+                   autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false">
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="password">密码</label>
+          <div class="control">
+            <span class="ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <rect x="4" y="10.5" width="16" height="10" rx="2.5"/>
+                <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+              </svg>
+            </span>
+            <input id="password" name="password" type="password" placeholder="请输入密码"
+                   autocomplete="current-password">
+            <button type="button" class="peek" id="peek" aria-label="显示密码" aria-pressed="false">
+              <svg class="eye-on" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+              <svg class="eye-off" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 4l16 16"/>
+                <path d="M9.9 5.9A9.6 9.6 0 0 1 12 5.5c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.8 3.6M6.4 7.9A17 17 0 0 0 2.5 12S6 18.5 12 18.5c1.1 0 2.1-.2 3-.5"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="row">
+          <label class="check">
+            <input type="checkbox" id="remember" checked>
+            <span class="box" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M4 12.5 9 17.5 20 6.5"/>
+              </svg>
+            </span>
+            <span>记住我</span>
+          </label>
+          <span class="hint">忘记密码请联系管理员</span>
+        </div>
+
+        <div class="alert" id="alert" role="alert" aria-live="assertive" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="9"/>
+            <path d="M12 7.5v5.5M12 16.2v.1"/>
+          </svg>
+          <span id="alertText"></span>
+        </div>
+
+        <button class="submit" id="submitBtn" type="submit">
+          <span class="spinner" aria-hidden="true"></span>
+          <span class="label">登录</span>
+        </button>
+      </form>
+
+      <div class="card-foot">
+        <span>公众号内容助手</span>
+        <span>v2.2.0</span>
+      </div>
+    </div>
+  </main>
+
+</div>
+
+<script>
+  const form = document.getElementById('loginForm');
+  const usernameEl = document.getElementById('username');
+  const passwordEl = document.getElementById('password');
+  const rememberEl = document.getElementById('remember');
+  const peekBtn = document.getElementById('peek');
+  const submitBtn = document.getElementById('submitBtn');
+  const alertBox = document.getElementById('alert');
+  const alertText = document.getElementById('alertText');
+
+  let loading = false;
+
+  function showAlert(message) {
+    alertText.textContent = message;
+    alertBox.hidden = false;
+    // 重新触发抖动动画：同一条提示连续出现两次时也要有反馈
+    alertBox.style.animation = 'none';
+    void alertBox.offsetWidth;
+    alertBox.style.animation = '';
+  }
+
+  function hideAlert() {
+    alertBox.hidden = true;
+  }
+
+  function setLoading(next) {
+    loading = next;
+    submitBtn.disabled = next;
+    submitBtn.classList.toggle('is-loading', next);
+    submitBtn.setAttribute('aria-busy', String(next));
+  }
+
+  peekBtn.addEventListener('click', () => {
+    const shown = passwordEl.type === 'text';
+    passwordEl.type = shown ? 'password' : 'text';
+    peekBtn.classList.toggle('is-on', !shown);
+    peekBtn.setAttribute('aria-pressed', String(!shown));
+    peekBtn.setAttribute('aria-label', shown ? '显示密码' : '隐藏密码');
+    passwordEl.focus();
+  });
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (loading) return;
+
+    const username = usernameEl.value.trim();
+    const password = passwordEl.value;
+
+    if (!username) { showAlert('请先填写账号'); usernameEl.focus(); return; }
+    if (!password) { showAlert('请先填写密码'); passwordEl.focus(); return; }
+
+    hideAlert();
+    setLoading(true);
+
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, remember: rememberEl.checked }),
+      });
+
+      let data = {};
+      try { data = await res.json(); } catch { /* 非 JSON 响应就走下面的兜底文案 */ }
+
+      if (res.ok) {
+        location.replace('/');
+        return;
+      }
+
+      if (res.status === 401) {
+        passwordEl.value = '';
+        passwordEl.focus();
+      }
+      showAlert(data.error || `登录失败（HTTP ${res.status}）`);
+    } catch {
+      showAlert('无法连接服务，请确认服务已启动后重试');
+    } finally {
+      setLoading(false);
+    }
+  });
+
+  usernameEl.focus();
+</script>
+</body>
+</html>
