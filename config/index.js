@@ -135,7 +135,7 @@ export const config = {
 
   // 文章生成风格配置
   articleStyle: {
-    // 可选风格: 'default' | 'jaychou'
+    // 可选风格: 'default'（爆款）| 'jaychou'（诗意叙事）| 'sharp'（观点犀利）| 'healing'（治愈温暖）| 'knowledge'（干货科普）
     style: process.env.ARTICLE_STYLE || 'default',
     // 采样温度。反 AI 检测靠的是句式多样性，温度太低会让表达更"标准"、更像 AI
     temperature: num(process.env.ARTICLE_TEMPERATURE, 0.9),
@@ -175,7 +175,7 @@ const PROVIDER_KEY_FIELD = {
   openai: ['openaiKey', 'OPENAI_API_KEY'],
   doubao: ['doubaoKey', 'DOUBAO_API_KEY'],
 };
-const VALID_STYLES = ['default', 'jaychou'];
+const VALID_STYLES = ['default', 'jaychou', 'sharp', 'healing', 'knowledge'];
 const VALID_IMAGE_PROVIDERS = ['unsplash', 'pexels', 'none'];
 
 /**

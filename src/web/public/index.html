@@ -644,11 +644,23 @@
       </button>
       <button class="chip" onclick="quickSend('用最热的话题生成一篇爆款文章')" data-page-node-id="6eZPz3LvbZgzf6DuywDLmP">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="0MRKcv6js98bkU0tmHljMC"><path d="M4 20h16M6 20V9l6-5 6 5v11" data-page-node-id="APyk65BtPLtFRN6tanwx3m"/></svg>
-        生成爆款文章
+        爆款风格
       </button>
-      <button class="chip" onclick="quickSend('用周杰伦风格写一篇情感文章')" data-page-node-id="OiuvkaIcbFc1CrqLqwv78N">
+      <button class="chip" onclick="quickSend('用诗意叙事风格写一篇情感文章')" data-page-node-id="OiuvkaIcbFc1CrqLqwv78N">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" data-page-node-id="ut5gHGJRG7BfhJENU3DvoI"><path d="M9 18V6l10-2v12" data-page-node-id="NQWj2ou4147TuzV1H5sNSz"/><circle cx="6.5" cy="18" r="2.5" data-page-node-id="PIqSvaTRmHG77S4sByNbRR"/><circle cx="16.5" cy="16" r="2.5" data-page-node-id="fMKInIBIBw4yXNFfPxNlvl"/></svg>
-        周杰伦风格
+        诗意叙事风
+      </button>
+      <button class="chip" onclick="quickSend('用观点犀利风格写一篇热点评论')" data-page-node-id="bB7xScAF2wml0L6Upe0zDm">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8Z"/></svg>
+        观点犀利风
+      </button>
+      <button class="chip" onclick="quickSend('用治愈温暖风格写一篇生活感悟')" data-page-node-id="cD9yKzG4nWpQ8xMvI3hCkP">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.6l-1-1a5.5 5.5 0 0 0-7.8 7.8l1 1L12 21.2l7.8-7.8 1-1a5.5 5.5 0 0 0 0-7.8Z"/></svg>
+        治愈温暖风
+      </button>
+      <button class="chip" onclick="quickSend('用干货科普风格写一篇知识科普')" data-page-node-id="eF4vZqJ7sTwR3bKnM9pQoX">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>
+        干货科普风
       </button>
       <button class="chip" onclick="quickSend('查看系统运行状态')" data-page-node-id="2w2PiAjd4Sq9kvqYgQcle5">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" data-page-node-id="vuazDB8HPOs54EmO5PtXZJ"><path d="M4 19V5M9 19v-7M14 19V9M19 19v-4" data-page-node-id="BvJ0pZabGDXoEBYFlg90mq"/></svg>
@@ -920,7 +932,7 @@
 
   const CAPABILITIES = [
     { icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 19V5M9 19v-7M14 19V9M19 19v-4"/></svg>', title: '热点采集', desc: '爬取微博热搜与抖音热点，自动排序去重' },
-    { icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>', title: '文章生成', desc: '爆款风格 / 周杰伦情感风格，自带反 AI 检测优化' },
+    { icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>', title: '智能内容创作', desc: '爆款 / 诗意叙事 / 观点犀利 / 治愈温暖 / 干货科普，自带反 AI 检测优化' },
     { icon: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>', title: '一键发布', desc: '推送至公众号草稿箱，并同步飞书通知' },
   ];
 

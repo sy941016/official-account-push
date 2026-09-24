@@ -86,7 +86,7 @@ export async function startWebSocket() {
       if (action === 'fetch_hot') {
         naturalCommand = '用默认风格帮我抓取最新热点，选最热的话题生成一篇文章并推送到公众号';
       } else if (action === 'fetch_jaychou') {
-        naturalCommand = '用周杰伦风格帮我生成一篇情感文章并推送到公众号';
+        naturalCommand = '用诗意叙事风格帮我生成一篇情感文章并推送到公众号';
       } else if (action === 'show_status') {
         naturalCommand = '查看系统运行状态';
       }

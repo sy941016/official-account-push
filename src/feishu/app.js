@@ -66,8 +66,15 @@ export const sendText = (text, cid = chatId) =>
 export async function sendArticleCard({ topicTitle, articleTitle, digest, source, rank, draftId, style, humanScore }, cid = chatId) {
   const sourceEmoji = source === 'weibo' ? '🔥' : '🎵';
   const sourceName = source === 'weibo' ? '微博热搜' : '抖音热点';
-  const styleEmoji = style === 'jaychou' ? '🎵' : '📰';
-  const styleName = style === 'jaychou' ? '周杰伦歌曲' : '默认风格';
+  // 风格展示元数据（与 src/ai/generator.js 的 STYLE_LABELS 对齐）
+  const STYLE_META = {
+    default: { emoji: '📰', name: '爆款风格' },
+    jaychou: { emoji: '🎵', name: '诗意叙事风' },
+    sharp: { emoji: '⚡', name: '观点犀利风' },
+    healing: { emoji: '🌿', name: '治愈温暖风' },
+    knowledge: { emoji: '📚', name: '干货科普风' },
+  };
+  const styleMeta = STYLE_META[style] || STYLE_META.default;
 
   const card = {
     config: { wide_screen_mode: true },
@@ -91,7 +98,7 @@ export async function sendArticleCard({ topicTitle, articleTitle, digest, source
         tag: 'div',
         fields: [
           { is_short: true, text: { tag: 'lark_md', content: `**草稿ID**\n\`${draftId || '生成中...'}\`` } },
-          { is_short: true, text: { tag: 'lark_md', content: `**文章风格**\n${styleEmoji} ${styleName}` } },
+          { is_short: true, text: { tag: 'lark_md', content: `**文章风格**\n${styleMeta.emoji} ${styleMeta.name}` } },
           {
             is_short: true,
             text: {
@@ -107,7 +114,7 @@ export async function sendArticleCard({ topicTitle, articleTitle, digest, source
         actions: [
           { tag: 'button', text: { tag: 'plain_text', content: '前往公众号草稿箱' }, type: 'primary', url: 'https://mp.weixin.qq.com' },
           { tag: 'button', text: { tag: 'plain_text', content: '用默认模式推送' }, type: 'default', value: { action: 'fetch_hot' } },
-          { tag: 'button', text: { tag: 'plain_text', content: '🎵 用周杰伦歌曲推送' }, type: 'default', value: { action: 'fetch_jaychou' } },
+          { tag: 'button', text: { tag: 'plain_text', content: '🎵 用诗意叙事风推送' }, type: 'default', value: { action: 'fetch_jaychou' } },
         ],
       },
     ],

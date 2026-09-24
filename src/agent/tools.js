@@ -115,7 +115,7 @@ const toolDefinitions = [
 
   {
     name: 'generate_article',
-    description: '根据话题信息生成微信公众号文章。返回文章标题、摘要、HTML正文等。支持两种风格：default（爆款风格）和 jaychou（周杰伦情感风格）',
+    description: '根据话题信息生成微信公众号文章。返回文章标题、摘要、HTML正文等。支持五种风格：default（爆款风格）、jaychou（诗意叙事风，青春情感类）、sharp（观点犀利风）、healing（治愈温暖风）、knowledge（干货科普风）',
     parameters: {
       type: 'object',
       properties: {
@@ -138,8 +138,8 @@ const toolDefinitions = [
         },
         style: {
           type: 'string',
-          enum: ['default', 'jaychou'],
-          description: '文章风格：default（爆款风格）或 jaychou（周杰伦情感风格），默认 default',
+          enum: ['default', 'jaychou', 'sharp', 'healing', 'knowledge'],
+          description: '文章风格：default（爆款）、jaychou（诗意叙事，青春情感）、sharp（观点犀利）、healing（治愈温暖）、knowledge（干货科普），默认 default',
         },
       },
       required: ['topicTitle', 'topicSummary'],

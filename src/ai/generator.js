@@ -27,7 +27,20 @@ import {
   scoreHumanity,
 } from './humanize.js';
 
-export const ARTICLE_STYLES = ['default', 'jaychou'];
+export const ARTICLE_STYLES = ['default', 'jaychou', 'sharp', 'healing', 'knowledge'];
+
+/**
+ * 风格展示名映射（面向用户的中文名）。
+ * jaychou 的内部 ID 保留不变（兼容 ARTICLE_STYLE 环境变量与历史配置），
+ * 展示名去名人化：内核仍是"青春歌曲式的情感叙事"，但不再出现"周杰伦"字样。
+ */
+export const STYLE_LABELS = {
+  default: '爆款风格',
+  jaychou: '诗意叙事风',
+  sharp: '观点犀利风',
+  healing: '治愈温暖风',
+  knowledge: '干货科普风',
+};
 
 // ===== 节奏参照范文 =====
 // 给模型一段"目标质感"的样本，比列一堆禁用词有效得多：
@@ -120,14 +133,36 @@ const SYSTEM_PROMPT_DEFAULT = `你是一位拥有10年经验的微信公众号�
 
 ${buildAntiDetectRules(RHYTHM_SAMPLE_DEFAULT)}`;
 
-// ===== 系统人设提示词（周杰伦歌曲 - 青春情感）=====
-const SYSTEM_PROMPT_JAYCHOU = `你是一位深受周杰伦音乐影响的写作者，你的文字里藏着《晴天》的青涩、《七里香》的诗意、《稻香》的温暖。
+// ===== 系统人设提示词（诗意叙事 - 青春情感，原"周杰伦情感风格"去名人化）=====
+// 不维护固定曲库，选歌交给模型：每次创作时从青春时代的歌里随机挑一首做主旋律，
+// 并明确要求不要每次都选同一首，避免总往最常被写到的歌上靠。
+const SYSTEM_PROMPT_JAYCHOU = `你是一位擅长诗意叙事的写作者，文字里有青春歌曲的底色：青涩的遗憾、雨后的温柔、旧时光的温暖。每次创作时，你先从青春时代的经典歌曲里随机挑选一首，作为这次文字的情感底色——不要每次都用同一首。
 你擅长用歌词般的意境和旋律感的文字，讲述关于青春、爱情、回忆和成长的故事。
 
 你的文字像一个人坐在你对面慢慢讲，不像一篇文章在朗读。该短的地方就一句话，
 该停的地方就留白，偶尔会突然想起一个细节，然后自己愣一下。
 
 ${buildAntiDetectRules(RHYTHM_SAMPLE_JAYCHOU)}`;
+
+// ===== 系统人设提示词（观点犀利风）=====
+const SYSTEM_PROMPT_SHARP = `你是一位观点犀利的评论写作者，善于一针见血地指出问题的本质。
+你敢下判断、不骑墙、不堆砌"正确的废话"。你的犀利来自逻辑的锋利，不是情绪上的攻击；
+你批评一个现象，但尊重具体的人。
+
+${buildAntiDetectRules(RHYTHM_SAMPLE_DEFAULT)}`;
+
+// ===== 系统人设提示词（治愈温暖风）=====
+const SYSTEM_PROMPT_HEALING = `你是一位温暖治愈的写作者，文字像深夜电台里一个轻声说话的主持人。
+你不熬鸡汤、不说教、不强行正能量；你只是把普通生活里那些细小的温柔和体谅，
+慢慢讲给人听。
+
+${buildAntiDetectRules(RHYTHM_SAMPLE_DEFAULT)}`;
+
+// ===== 系统人设提示词（干货科普风）=====
+const SYSTEM_PROMPT_KNOWLEDGE = `你是一位严谨的知识科普写作者，擅长把复杂的事讲得简单、准确、可执行。
+你写的每个关键事实都要有依据，拿不准的就说"这一点存在争议"，绝不编造数字和结论。
+
+${buildAntiDetectRules(RHYTHM_SAMPLE_DEFAULT)}`;
 
 /**
  * 拼【背景】行。
@@ -139,6 +174,26 @@ function backgroundLine(summary) {
   const text = String(summary ?? '').trim();
   return text ? `\n背景：${text}` : '';
 }
+
+// ===== 共享排版与输出规范（default / sharp / healing / knowledge 通用）=====
+const HTML_RULES = `四、HTML排版（微信公众号专用，必须使用内联样式）
+- 段落：<p style="margin: 16px 0; line-height: 1.8; font-size: 16px; color: #333;">
+- 小标题：<h2 style="font-size: 20px; font-weight: bold; color: #1a1a1a; margin: 28px 0 12px; border-left: 4px solid #07C160; padding-left: 12px;">
+- 重点词：<strong style="color: #e04040;">
+- 金句引用：<blockquote style="border-left: 3px solid #07C160; margin: 20px 0; padding: 12px 16px; background: #f9f9f9; color: #555; font-style: italic;">
+- 数据高亮：<span style="color: #07C160; font-weight: bold;">
+- 小标题控制在 3-5 个，不要更多；单句成段的那种段落**不要**加小标题`;
+
+const JSON_SCHEMA = `请以 JSON 格式输出，字段如下：
+{
+  "title": "标题（不超过25字）",
+  "digest": "文章摘要，60-100字，突出亮点，吸引点击，用于公众号摘要显示",
+  "contentHtml": "完整文章正文HTML，必须使用上述内联样式规范",
+  "keywords": ["核心关键词1", "关键词2", "关键词3"],
+  "imageQuery": "用于搜索配图的英文关键词，2-4个词，偏向具体场景而非抽象概念"
+}
+
+只输出 JSON，不要有任何其他内容。`;
 
 // ===== 默认风格 Prompt 模板 =====
 const PROMPT_TEMPLATE_DEFAULT = (topic) => `
@@ -171,29 +226,18 @@ const PROMPT_TEMPLATE_DEFAULT = (topic) => `
 - 口语化、有温度，像朋友聊天，不像论文也不像新闻稿
 - 关键观点用 <strong> 或 <blockquote> 突出，但不要每段都突出
 
-四、HTML排版（微信公众号专用，必须使用内联样式）
-- 段落：<p style="margin: 16px 0; line-height: 1.8; font-size: 16px; color: #333;">
-- 小标题：<h2 style="font-size: 20px; font-weight: bold; color: #1a1a1a; margin: 28px 0 12px; border-left: 4px solid #07C160; padding-left: 12px;">
-- 重点词：<strong style="color: #e04040;">
-- 金句引用：<blockquote style="border-left: 3px solid #07C160; margin: 20px 0; padding: 12px 16px; background: #f9f9f9; color: #555; font-style: italic;">
-- 数据高亮：<span style="color: #07C160; font-weight: bold;">
-- 小标题控制在 3-5 个，不要更多；单句成段的那种段落**不要**加小标题
+${HTML_RULES}
 
-请以 JSON 格式输出，字段如下：
-{
-  "title": "优化后的爆款标题（不超过25字）",
-  "digest": "文章摘要，60-100字，突出亮点，吸引点击，用于公众号摘要显示",
-  "contentHtml": "完整文章正文HTML，必须使用上述内联样式规范",
-  "keywords": ["核心关键词1", "关键词2", "关键词3"],
-  "imageQuery": "用于搜索配图的英文关键词，2-4个词，偏向具体场景而非抽象概念"
-}
+${JSON_SCHEMA}`.trim();
 
-只输出 JSON，不要有任何其他内容。
-`.trim();
-
-// ===== 周杰伦歌曲 Prompt 模板 =====
+// ===== 诗意叙事 Prompt 模板（原周杰伦歌曲模板，去名人化）=====
 const PROMPT_TEMPLATE_JAYCHOU = (topic) => `
-请根据以下话题，创作一篇充满周杰伦音乐风格的情感文章。
+请根据以下话题，创作一篇充满诗意叙事风格的情感文章。
+
+【本次主旋律】
+动笔前，先从青春时代的经典歌曲里随机挑选一首，作为本次文章的情感底色。
+标题的意境要与这首歌呼应；正文的情绪起伏要贴合这首歌的气质。
+不要每次都用同一首；化用意境即可，不要直接大段引用歌词原文。
 
 【话题信息】
 主题：${topic.title}${backgroundLine(topic.summary)}
@@ -203,7 +247,7 @@ const PROMPT_TEMPLATE_JAYCHOU = (topic) => `
 一、标题（必须满足以下至少2条）
 - 不超过25个字，有诗意或画面感
 - 像一首歌的名字，让人想点进去听这个故事
-- 可以化用周杰伦歌曲的意境：如"晴天""七里香""稻香""简单爱""星晴""彩虹"
+- 与你选定的那首歌的意境呼应
 - 引发情感共鸣，关于青春、爱情、回忆或成长
 
 二、正文（1200-1800字）
@@ -217,7 +261,7 @@ const PROMPT_TEMPLATE_JAYCHOU = (topic) => `
 5. 桥段从个人故事延伸到普遍情感，可以有一点哲思，但保持温柔，不说教
 6. 结尾不要总结，留一个画面或一个问题，让读者读完还想再听一遍"这首歌"
 
-三、语言风格（周杰伦音乐感）
+三、语言风格（诗意叙事感）
 - 文字有画面感：街角的咖啡店、窗外的麻雀、泛黄的信纸、单车后座
 - 善用自然意象：风、雨、阳光、星空、稻田、彩虹、晴天
 - 句子长短交错，有节奏感，像歌词一样
@@ -243,6 +287,94 @@ const PROMPT_TEMPLATE_JAYCHOU = (topic) => `
 只输出 JSON，不要有任何其他内容。
 `.trim();
 
+// ===== 观点犀利 Prompt 模板 =====
+const PROMPT_TEMPLATE_SHARP = (topic) => `
+请根据以下话题，创作一篇观点犀利、立场鲜明的公众号评论文章。
+
+【话题信息】
+标题：${topic.title}${backgroundLine(topic.summary)}
+来源：${topic.source === 'weibo' ? '微博热搜' : topic.source === 'douyin' ? '抖音热点' : '自定义话题'}（热度排名第${topic.rank}位）
+
+【写作要求】
+
+一、标题（必须满足以下至少3条）
+- 不超过25个字
+- 观点鲜明，让人一眼看出你的态度
+- 制造张力或反差（如：大家都在夸的时候，敢说一句"先别急"）
+- 不做无立场的中庸标题
+
+二、正文（1200-1800字）
+1. 开篇不绕弯子，前三句话内亮明你的核心观点
+2. 给出支撑观点的关键论据，落点要具体（某个人、某件事、某个数字）
+3. 至少从 2 个角度拆解问题，并至少反驳 1 种常见的反对意见或误解
+4. 观点可以锋利，但不攻击具体的人，不煽动对立
+5. 结尾用一句有力的判断或一个尖锐的问题收束，**不要**总结陈词
+
+三、语言风格
+- 短句有力，敢用"我认为""说白了""问题在于"这类直接表达
+- 金句自然出现，不堆砌；犀利但不刻薄
+
+${HTML_RULES}
+
+${JSON_SCHEMA}`.trim();
+
+// ===== 治愈温暖 Prompt 模板 =====
+const PROMPT_TEMPLATE_HEALING = (topic) => `
+请根据以下话题，创作一篇温暖治愈的公众号文章，给读者一点具体的温柔。
+
+【话题信息】
+标题：${topic.title}${backgroundLine(topic.summary)}
+
+【写作要求】
+
+一、标题（必须满足以下至少2条）
+- 不超过25个字，温柔、有画面感
+- 不喊口号、不贩卖焦虑
+- 让人想点进去，在文章里歇一歇
+
+二、正文（1200-1800字）
+1. 从一个具体的小场景切入：深夜的厨房、下雨的公交站、一条没回复的消息
+2. 讲一个普通人的小故事，细节落到时间、地点、物件上
+3. 不否认生活里难的部分，先接住情绪，再给出温柔的视角
+4. 结尾不强行升华、不给答案，留一点暖意和余地
+
+三、语言风格
+- 克制、温柔，像轻声说话；少用感叹号，少堆形容词
+- 共情但不煽情，不写"你一定要坚强"这类说教
+
+${HTML_RULES}
+
+${JSON_SCHEMA}`.trim();
+
+// ===== 干货科普 Prompt 模板 =====
+const PROMPT_TEMPLATE_KNOWLEDGE = (topic) => `
+请根据以下话题，创作一篇信息增量扎实、清晰易懂的干货科普文章。
+
+【话题信息】
+标题：${topic.title}${backgroundLine(topic.summary)}
+来源：${topic.source === 'weibo' ? '微博热搜' : topic.source === 'douyin' ? '抖音热点' : '自定义话题'}（热度排名第${topic.rank}位）
+
+【写作要求】
+
+一、标题（必须满足以下至少2条）
+- 不超过25个字，明确告诉读者这篇文章能让他获得什么
+- 可以带"一文看懂 / 怎么选 / 为什么"这类价值提示，但禁止标题党
+
+二、正文（1200-1800字）
+1. 开篇先讲清楚读者为什么需要了解这件事，与他的生活有什么关系
+2. 核心概念用具体类比讲透，不堆术语；出现专业词要顺手解释
+3. 给出可操作的建议或要点清单，让读者读完能用上
+4. 至少纠正 1 个常见误区
+5. 结尾给一个"如果想继续了解"的方向，**不要**总结陈词
+
+三、语言风格
+- 清晰、准确、好懂，可以有一点幽默
+- 所有关键数字和结论必须有依据；话题信息里没有的，一律不写
+
+${HTML_RULES}
+
+${JSON_SCHEMA}`.trim();
+
 // ===== 文章尾部固定内容 =====
 const ARTICLE_FOOTER = `
 <p style="margin: 40px 0 8px; text-align: center; color: #999; font-size: 14px;">— END —</p>
@@ -256,12 +388,29 @@ export function normalizeStyle(style) {
   return ARTICLE_STYLES.includes(style) ? style : 'default';
 }
 
+const SYSTEM_PROMPTS = {
+  default: SYSTEM_PROMPT_DEFAULT,
+  jaychou: SYSTEM_PROMPT_JAYCHOU,
+  sharp: SYSTEM_PROMPT_SHARP,
+  healing: SYSTEM_PROMPT_HEALING,
+  knowledge: SYSTEM_PROMPT_KNOWLEDGE,
+};
+
+const PROMPT_TEMPLATES = {
+  default: PROMPT_TEMPLATE_DEFAULT,
+  jaychou: PROMPT_TEMPLATE_JAYCHOU,
+  sharp: PROMPT_TEMPLATE_SHARP,
+  healing: PROMPT_TEMPLATE_HEALING,
+  knowledge: PROMPT_TEMPLATE_KNOWLEDGE,
+};
+
 function getSystemPrompt(style) {
-  return style === 'jaychou' ? SYSTEM_PROMPT_JAYCHOU : SYSTEM_PROMPT_DEFAULT;
+  return SYSTEM_PROMPTS[style] || SYSTEM_PROMPT_DEFAULT;
 }
 
 function getPromptTemplate(topic, style) {
-  return style === 'jaychou' ? PROMPT_TEMPLATE_JAYCHOU(topic) : PROMPT_TEMPLATE_DEFAULT(topic);
+  const template = PROMPT_TEMPLATES[style] || PROMPT_TEMPLATE_DEFAULT;
+  return template(topic);
 }
 
 /**
@@ -272,7 +421,7 @@ function getPromptTemplate(topic, style) {
  *
  * @param {object} topic 标准化话题对象
  * @param {object} [options]
- * @param {'default'|'jaychou'} [options.style] 文章风格，缺省时用 config.articleStyle.style
+ * @param {'default'|'jaychou'|'sharp'|'healing'|'knowledge'} [options.style] 文章风格，缺省时用 config.articleStyle.style
  * @returns {Promise<object|null>} 失败返回 null（调用方无需处理异常）
  */
 export async function generateArticle(topic, options = {}) {
