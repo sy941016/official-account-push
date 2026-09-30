@@ -134,8 +134,3 @@ export async function sendErrorAlert(errorMsg, step, cid = chatId) {
   };
   return sendMessage(cid, 'interactive', card);
 }
-
-// ===== 说明 =====
-// 指令解析与状态卡片已移除：
-// Agent 模式下由 AI 直接理解自然语言，系统状态通过 get_system_status 工具返回，
-// 不再需要单独的卡片渲染路径。

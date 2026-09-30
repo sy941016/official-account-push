@@ -13,7 +13,7 @@
  *   - 正文图片断言要检查"用的是微信返回的 URL"，不能是图库原始 URL ——
  *     这正是这一版要修的核心问题（外链图在公众号里不渲染）。
  */
-import test, { before, after, beforeEach } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { existsSync, rmSync } from 'node:fs';
@@ -171,17 +171,15 @@ function startMockServer() {
 
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
+      server.unref(); // 不阻塞测试进程退出，无需显式 close
       state.base = `http://127.0.0.1:${server.address().port}`;
-      resolve({ close: () => new Promise((r) => server.close(r)) });
+      resolve({});
     });
   });
 }
 
 // ===== 夹具 =====
 
-let server;
-let publishToDraft;
-let resetPublisherCache;
 let tempTokenFile;
 const saved = {};
 
@@ -196,61 +194,63 @@ const ARTICLE = {
 const draftContent = () => state.draftBody.articles[0].content;
 const draftThumb = () => state.draftBody.articles[0].thumb_media_id;
 
-before(async () => {
-  // 预热懒加载依赖：provider.js 是 await import('axios')，
-  // 沙箱里首次加载慢会把本地连接拖到被重置，表现为假失败
-  await import('axios');
+// Node 18 的 test runner：顶层 before/after 不执行，顶层 await 与异步 hook 中
+// server.listen 会死锁。mock 服务改为用例内懒初始化，配置还原挂到 process exit。
+let server;
+let publishToDraft;
+let resetPublisherCache;
 
-  server = await startMockServer();
+async function ensureMock() {
+  if (!server) {
+    await import('axios'); // 预热懒加载依赖，避免首次加载拖垮本地 mock 连接
 
-  Object.assign(saved, {
-    wechatApiBase: config.wechat.apiBase,
-    wechatAppId: config.wechat.appId,
-    wechatAppSecret: config.wechat.appSecret,
-    tokenCacheFile: config.tokenCacheFile,
-    provider: config.image.provider,
-    unsplashKey: config.image.unsplashKey,
-    unsplashApiBase: config.image.unsplashApiBase,
-    count: config.image.count,
-    asCover: config.image.asCover,
-  });
+    server = await startMockServer();
 
-  tempTokenFile = join(tmpdir(), `oap-test-wechat-token-${process.pid}.json`);
-  if (existsSync(tempTokenFile)) rmSync(tempTokenFile, { force: true });
+    Object.assign(saved, {
+      wechatApiBase: config.wechat.apiBase,
+      wechatAppId: config.wechat.appId,
+      wechatAppSecret: config.wechat.appSecret,
+      tokenCacheFile: config.tokenCacheFile,
+      provider: config.image.provider,
+      unsplashKey: config.image.unsplashKey,
+      unsplashApiBase: config.image.unsplashApiBase,
+      count: config.image.count,
+      asCover: config.image.asCover,
+    });
 
-  config.wechat.apiBase = state.base;
-  config.wechat.appId = 'test-appid';
-  config.wechat.appSecret = 'test-appsecret';
-  config.tokenCacheFile = tempTokenFile;
+    tempTokenFile = join(tmpdir(), `oap-test-wechat-token-${process.pid}.json`);
+    if (existsSync(tempTokenFile)) rmSync(tempTokenFile, { force: true });
 
-  config.image.provider = 'unsplash';
-  config.image.unsplashKey = 'test-unsplash-key';
-  config.image.unsplashApiBase = state.base;
-  config.image.count = 2;
-  config.image.asCover = true;
+    config.wechat.apiBase = state.base;
+    config.wechat.appId = 'test-appid';
+    config.wechat.appSecret = 'test-appsecret';
+    config.tokenCacheFile = tempTokenFile;
 
-  ({ publishToDraft, resetPublisherCache } = await import('../src/wechat/publisher.js'));
-});
+    config.image.provider = 'unsplash';
+    config.image.unsplashKey = 'test-unsplash-key';
+    config.image.unsplashApiBase = state.base;
+    config.image.count = 2;
+    config.image.asCover = true;
 
-after(async () => {
-  config.wechat.apiBase = saved.wechatApiBase;
-  config.wechat.appId = saved.wechatAppId;
-  config.wechat.appSecret = saved.wechatAppSecret;
-  config.tokenCacheFile = saved.tokenCacheFile;
-  Object.assign(config.image, {
-    provider: saved.provider,
-    unsplashKey: saved.unsplashKey,
-    unsplashApiBase: saved.unsplashApiBase,
-    count: saved.count,
-    asCover: saved.asCover,
-  });
+    ({ publishToDraft, resetPublisherCache } = await import('../src/wechat/publisher.js'));
 
-  await server.close();
-  if (tempTokenFile && existsSync(tempTokenFile)) rmSync(tempTokenFile, { force: true });
-});
+    process.on('exit', () => {
+      config.wechat.apiBase = saved.wechatApiBase;
+      config.wechat.appId = saved.wechatAppId;
+      config.wechat.appSecret = saved.wechatAppSecret;
+      config.tokenCacheFile = saved.tokenCacheFile;
+      Object.assign(config.image, {
+        provider: saved.provider,
+        unsplashKey: saved.unsplashKey,
+        unsplashApiBase: saved.unsplashApiBase,
+        count: saved.count,
+        asCover: saved.asCover,
+      });
+      if (existsSync(tempTokenFile)) rmSync(tempTokenFile, { force: true });
+    });
+  }
 
-beforeEach(() => {
-  // 每个用例都从干净状态开始，否则 token / 封面 media_id 会串台
+  // 每个用例都从干净状态开始（原 beforeEach），否则 token / 封面 media_id 会串台
   resetPublisherCache();
   if (existsSync(tempTokenFile)) rmSync(tempTokenFile, { force: true });
 
@@ -263,11 +263,18 @@ beforeEach(() => {
   state.hits.length = 0;
   state.uploads.length = 0;
   state.draftBody = null;
-});
+}
+
+// 用例统一入口：先确保 mock 就绪再执行用例体
+const t = (name, fn) =>
+  test(name, async () => {
+    await ensureMock();
+    await fn();
+  });
 
 // ===== 用例 =====
 
-test('配图开启：正文用微信返回的 URL，封面用配图上传的永久素材', async () => {
+t('配图开启：正文用微信返回的 URL，封面用配图上传的永久素材', async () => {
   const draftId = await publishToDraft(ARTICLE);
 
   assert.equal(draftId, 'DRAFT_MEDIA_ID', '草稿应创建成功');
@@ -287,7 +294,7 @@ test('配图开启：正文用微信返回的 URL，封面用配图上传的永�
   assert.ok(content.includes('张三') && content.includes('李四'), '应列出摄影师姓名');
 });
 
-test('配图上传走的是 multipart，字段名为 media，且带正确后缀的文件名', async () => {
+t('配图上传走的是 multipart，字段名为 media，且带正确后缀的文件名', async () => {
   await publishToDraft(ARTICLE);
 
   const perm = state.uploads.find((u) => u.endpoint === '/cgi-bin/material/add_material');
@@ -305,7 +312,7 @@ test('配图上传走的是 multipart，字段名为 media，且带正确后缀�
   assert.equal(perm.type, 'image', '永久素材必须带 type=image');
 });
 
-test('图库 Key 无效（401）：降级为素材库封面，正文无图，草稿照常创建', async () => {
+t('图库 Key 无效（401）：降级为素材库封面，正文无图，草稿照常创建', async () => {
   state.searchStatus = 401; // 401 不可重试，用例不会白等退避
 
   const draftId = await publishToDraft(ARTICLE);
@@ -316,7 +323,7 @@ test('图库 Key 无效（401）：降级为素材库封面，正文无图，草
   assert.ok(!draftContent().includes('配图来自'), '没有配图就不该有署名');
 });
 
-test('图库搜不到结果：同样降级，不影响发布', async () => {
+t('图库搜不到结果：同样降级，不影响发布', async () => {
   state.photoCount = 0;
 
   const draftId = await publishToDraft(ARTICLE);
@@ -326,7 +333,7 @@ test('图库搜不到结果：同样降级，不影响发布', async () => {
   assert.ok(!draftContent().includes('<img '));
 });
 
-test('图片下载失败：该张跳过，其余继续；封面退回素材库', async () => {
+t('图片下载失败：该张跳过，其余继续；封面退回素材库', async () => {
   state.downloadOk = false;
 
   const draftId = await publishToDraft(ARTICLE);
@@ -336,7 +343,7 @@ test('图片下载失败：该张跳过，其余继续；封面退回素材库',
   assert.ok(!draftContent().includes('<img '));
 });
 
-test('永久素材上传失败：封面退回素材库，但这张图仍作为正文插图上传', async () => {
+t('永久素材上传失败：封面退回素材库，但这张图仍作为正文插图上传', async () => {
   state.permanentOk = false;
 
   const draftId = await publishToDraft(ARTICLE);
@@ -348,7 +355,7 @@ test('永久素材上传失败：封面退回素材库，但这张图仍作为�
   assert.equal((draftContent().match(/<img /g) || []).length, 2);
 });
 
-test('IMAGE_AS_COVER=false：配图只进正文，封面仍取素材库', async () => {
+t('IMAGE_AS_COVER=false：配图只进正文，封面仍取素材库', async () => {
   config.image.asCover = false;
   try {
     const draftId = await publishToDraft(ARTICLE);
@@ -365,7 +372,7 @@ test('IMAGE_AS_COVER=false：配图只进正文，封面仍取素材库', async 
   }
 });
 
-test('配图整体关闭（IMAGE_PROVIDER=none）：不搜图，行为与旧版一致', async () => {
+t('配图整体关闭（IMAGE_PROVIDER=none）：不搜图，行为与旧版一致', async () => {
   config.image.provider = 'none';
   try {
     const draftId = await publishToDraft(ARTICLE);
@@ -382,7 +389,7 @@ test('配图整体关闭（IMAGE_PROVIDER=none）：不搜图，行为与旧版�
   }
 });
 
-test('配图和素材库都拿不到图：返回 null（封面是硬依赖，不能假装成功）', async () => {
+t('配图和素材库都拿不到图：返回 null（封面是硬依赖，不能假装成功）', async () => {
   state.searchStatus = 401;
   state.materials = [];
 

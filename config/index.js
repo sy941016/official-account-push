@@ -99,8 +99,6 @@ export const config = {
     // 两条话题之间的间隔，避免触发平台频控
     topicIntervalMs: num(process.env.TOPIC_INTERVAL_SECONDS, 5) * 1000,
     localServerPort: int(process.env.LOCAL_SERVER_PORT, 8080),
-    // 注意：日志级别在 log.level，不在这个段里。曾经这里放过一个 run.logLevel，
-    // 但没有任何代码读它，改它不会有任何效果（同一个 LOG_LEVEL 环境变量已经由 log.level 消费）。
     // HTTP 请求体大小上限（字节），防止内存被撑爆
     maxBodyBytes: int(process.env.MAX_BODY_BYTES, 1_000_000),
   },

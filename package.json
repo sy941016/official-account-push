@@ -9,12 +9,10 @@
     "once": "node src/main.js --mode=once",
     "dry-run": "node src/main.js --mode=once --dry-run",
     "scheduler": "node src/main.js --mode=scheduler",
-    "websocket": "node src/main.js --mode=websocket",
     "server": "node src/main.js --mode=server",
     "web": "node src/main.js --mode=web",
-    "weibo-only": "node src/main.js --mode=once --source=weibo",
-    "douyin-only": "node src/main.js --mode=once --source=douyin",
-    "dev": "node --watch src/main.js --mode=web",
+    "dev": "concurrently -k -n web,ui -c green,cyan \"node --watch src/main.js --mode=web\" \"vite --config frontend/vite.config.js\"",
+    "build:web": "vite build --config frontend/vite.config.js",
     "score": "node scripts/score.js",
     "test": "node --test"
   },
@@ -25,9 +23,16 @@
     "cheerio": "1.0.0-rc.12",
     "dotenv": "^16.4.0",
     "node-cron": "^3.0.3",
-    "openai": "^4.47.0"
+    "openai": "^4.47.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
   },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "concurrently": "^8.2.2",
+    "vite": "^5.4.21"
   }
 }

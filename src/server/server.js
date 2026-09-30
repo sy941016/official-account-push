@@ -1,8 +1,9 @@
 /**
  * Web 聊天服务
- * 提供简单的 Web 聊天界面和 API 接口
- * - GET  /            → 助手页（未登录则跳转 /login）
- * - GET  /login       → 登录页（已登录则跳回 /）
+ * 前端为 Vite + React 构建产物（frontend/ 目录，npm run build:web 输出到 public/dist）：
+ * - GET  /            → 助手页 SPA（未登录则跳转 /login）
+ * - GET  /login       → 登录页 SPA（已登录则跳回 /）
+ * - GET  /assets/*    → 构建产物静态资源（带 hash 文件名，长缓存）
  * - POST /api/login   → 账号密码登录，成功下发签名会话 cookie
  * - POST /api/logout  → 退出登录
  * - GET  /api/me      → 当前登录账号
@@ -15,8 +16,8 @@
  * 都为空时整个登录环节静默跳过，行为与加登录之前完全一致。
  */
 import { createServer } from 'http';
-import { readFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { readFileSync, existsSync } from 'fs';
+import { join, dirname, extname, normalize, sep } from 'path';
 import { fileURLToPath } from 'url';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
@@ -35,6 +36,9 @@ import {
 } from './auth.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Vite 构建产物目录（npm run build:web 输出） */
+const DIST_DIR = join(__dirname, 'public', 'dist');
 
 /** @type {import('../agent/core.js').default} */
 let _agent = null;
@@ -89,7 +93,12 @@ async function handleRequest(req, res) {
   // 登录页：已登录的人不该再看到它，直接送回助手页
   if (method === 'GET' && (pathname === '/login' || pathname === '/login.html')) {
     if (authed) return redirect(res, '/');
-    return serveFile(res, join(__dirname, 'public', 'login.html'), 'text/html');
+    return serveSpa(res);
+  }
+
+  // 静态资源（Vite 构建产物）不受登录限制：登录页本身也要加载 JS/CSS
+  if (method === 'GET' && pathname.startsWith('/assets/')) {
+    return serveAsset(res, pathname);
   }
 
   if (method === 'POST' && pathname === '/api/login') {
@@ -112,9 +121,9 @@ async function handleRequest(req, res) {
     return json(res, 200, { username: session?.username || '', loginEnabled });
   }
 
-  // 静态页面
+  // SPA 页面（前端按 pathname 决定渲染聊天页还是登录页）
   if (method === 'GET' && pathname === '/') {
-    return serveFile(res, join(__dirname, 'public', 'index.html'), 'text/html');
+    return serveSpa(res);
   }
 
   // 其余接口在配置了 WEB_ACCESS_TOKEN 时需要带令牌
@@ -265,6 +274,64 @@ function serveFile(res, filePath, contentType) {
   try {
     const content = readFileSync(filePath, 'utf-8');
     res.writeHead(200, { 'Content-Type': `${contentType}; charset=utf-8`, 'Cache-Control': 'no-store' });
+    res.end(content);
+  } catch {
+    res.writeHead(404);
+    res.end('Not Found');
+  }
+}
+
+/**
+ * 伺服 SPA 入口（React 构建产物 index.html）。
+ * 前端还没构建过时给出明确指引，而不是一个让人摸不着头脑的 404。
+ */
+function serveSpa(res) {
+  const index = join(DIST_DIR, 'index.html');
+  if (!existsSync(index)) {
+    res.writeHead(503, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+    res.end(
+      '<h1>前端未构建</h1>' +
+      '<p>请先运行 <code>npm run build:web</code>；开发时请使用 <code>npm run dev</code>（Vite 代理到 5173）。</p>'
+    );
+    return;
+  }
+  serveFile(res, index, 'text/html');
+}
+
+/** 静态资源 Content-Type 映射（Vite 产物的常见类型） */
+const ASSET_TYPES = {
+  '.js': 'text/javascript',
+  '.css': 'text/css',
+  '.map': 'application/json',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.gif': 'image/gif',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+};
+
+/**
+ * 伺服构建产物里的静态资源。
+ * URL 路径形如 /assets/index-xxx.js，相对 DIST_DIR 解析；
+ * 文件名带内容 hash，可放心长缓存；路径规范化后必须仍位于 DIST_DIR 内，防目录穿越。
+ */
+function serveAsset(res, pathname) {
+  const filePath = normalize(join(DIST_DIR, pathname.slice(1)));
+  if (!filePath.startsWith(DIST_DIR + sep)) {
+    return json(res, 403, { error: 'forbidden' });
+  }
+
+  try {
+    const content = readFileSync(filePath);
+    res.writeHead(200, {
+      'Content-Type': ASSET_TYPES[extname(filePath).toLowerCase()] || 'application/octet-stream',
+      'Content-Length': content.length,
+      'Cache-Control': 'public, max-age=31536000, immutable',
+    });
     res.end(content);
   } catch {
     res.writeHead(404);

@@ -10,7 +10,7 @@
  *
  * main.js 有"只有直接执行才启动"的守卫，所以这里 import 它是安全的。
  */
-import test, { before, after } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { existsSync, readFileSync, rmSync, statSync } from 'node:fs';
@@ -61,10 +61,10 @@ function startMockServer() {
 
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
+      server.unref(); // 不阻塞测试进程退出，无需显式 close
       resolve({
         base: `http://127.0.0.1:${server.address().port}`,
         hits,
-        close: () => new Promise((r) => server.close(r)),
       });
     });
   });
@@ -72,8 +72,6 @@ function startMockServer() {
 
 // ===== 夹具 =====
 
-let mock;
-let runPipeline;
 let tempCacheFile;
 const saved = {};
 
@@ -90,51 +88,62 @@ function readLogSince(offset) {
   return readFileSync(file).subarray(offset).toString('utf-8');
 }
 
-before(async () => {
-  // 预热重量级懒加载依赖，理由同 crawler.test.js
-  await import('cheerio');
+// Node 18 的 test runner：顶层 before/after 不执行，顶层 await 与异步 hook 中
+// server.listen 会死锁。mock 服务改为用例内懒初始化，配置还原挂到 process exit。
+let mock;
+let runPipeline;
 
-  mock = await startMockServer();
+async function ensureMock() {
+  if (!mock) {
+    await import('cheerio'); // 预热懒加载依赖，避免首次加载拖垮本地 mock 连接
 
-  // 快照，after 里原样还原
-  Object.assign(saved, {
-    weiboUrl: config.crawler.weiboUrl,
-    cacheFile: config.cacheFile,
-    doubaoBaseUrl: config.ai.doubaoBaseUrl,
-    doubaoKey: config.ai.doubaoKey,
-    provider: config.ai.provider,
-    wechatAppId: config.wechat.appId,
-    feishuAppId: config.feishu.appId,
+    mock = await startMockServer();
+
+    // 快照，exit 时原样还原
+    Object.assign(saved, {
+      weiboUrl: config.crawler.weiboUrl,
+      cacheFile: config.cacheFile,
+      doubaoBaseUrl: config.ai.doubaoBaseUrl,
+      doubaoKey: config.ai.doubaoKey,
+      provider: config.ai.provider,
+      wechatAppId: config.wechat.appId,
+      feishuAppId: config.feishu.appId,
+    });
+
+    // 把两个外部依赖指向 mock。provider 固定为 doubao，
+    // 让用例不依赖本机 .env 里选的是哪家 —— 否则换个机器测试就会走别的分支。
+    config.crawler.weiboUrl = `${mock.base}/weibo`;
+    config.ai.doubaoBaseUrl = mock.base;
+    config.ai.doubaoKey = 'test-key';
+    config.ai.provider = 'doubao';
+
+    ({ runPipeline } = await import('../src/main.js'));
+
+    process.on('exit', () => {
+      Object.assign(config.crawler, { weiboUrl: saved.weiboUrl });
+      Object.assign(config.ai, {
+        doubaoBaseUrl: saved.doubaoBaseUrl,
+        doubaoKey: saved.doubaoKey,
+        provider: saved.provider,
+      });
+      config.cacheFile = saved.cacheFile;
+      config.wechat.appId = saved.wechatAppId;
+      config.feishu.appId = saved.feishuAppId;
+      if (tempCacheFile && existsSync(tempCacheFile)) rmSync(tempCacheFile, { force: true });
+    });
+  }
+}
+
+// 用例统一入口：先确保 mock 就绪再执行用例体
+const t = (name, fn) =>
+  test(name, async () => {
+    await ensureMock();
+    await fn();
   });
-
-  // 把两个外部依赖指向 mock。provider 固定为 doubao，
-  // 让用例不依赖本机 .env 里选的是哪家 —— 否则换个机器测试就会走别的分支。
-  config.crawler.weiboUrl = `${mock.base}/weibo`;
-  config.ai.doubaoBaseUrl = mock.base;
-  config.ai.doubaoKey = 'test-key';
-  config.ai.provider = 'doubao';
-
-  ({ runPipeline } = await import('../src/main.js'));
-});
-
-after(async () => {
-  Object.assign(config.crawler, { weiboUrl: saved.weiboUrl });
-  Object.assign(config.ai, {
-    doubaoBaseUrl: saved.doubaoBaseUrl,
-    doubaoKey: saved.doubaoKey,
-    provider: saved.provider,
-  });
-  config.cacheFile = saved.cacheFile;
-  config.wechat.appId = saved.wechatAppId;
-  config.feishu.appId = saved.feishuAppId;
-
-  await mock.close();
-  if (tempCacheFile && existsSync(tempCacheFile)) rmSync(tempCacheFile, { force: true });
-});
 
 // ===== 用例 =====
 
-test('试运行：完整跑通链路，但不推送、不通知、不写去重缓存', async () => {
+t('试运行：完整跑通链路，但不推送、不通知、不写去重缓存', async () => {
   tempCacheFile = join(tmpdir(), `oap-test-processed-${process.pid}-dry.json`);
   if (existsSync(tempCacheFile)) rmSync(tempCacheFile, { force: true });
   config.cacheFile = tempCacheFile;
@@ -163,7 +172,7 @@ test('试运行：完整跑通链路，但不推送、不通知、不写去重�
   assert.ok(!appended.includes('推送至微信草稿箱'), '日志中不应出现真正的推送动作');
 });
 
-test('非试运行：生成后写入去重缓存，并记录统计', async () => {
+t('非试运行：生成后写入去重缓存，并记录统计', async () => {
   tempCacheFile = join(tmpdir(), `oap-test-processed-${process.pid}-real.json`);
   if (existsSync(tempCacheFile)) rmSync(tempCacheFile, { force: true });
   config.cacheFile = tempCacheFile;

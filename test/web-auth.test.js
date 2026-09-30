@@ -14,7 +14,7 @@ import {
   recordLoginFailure,
   recordLoginSuccess,
   resetLoginThrottle,
-} from '../src/web/auth.js';
+} from '../src/server/auth.js';
 
 /**
  * 登录鉴权的单元测试。

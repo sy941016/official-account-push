@@ -11,7 +11,7 @@
  * 环境提示：若环境变量里有 HTTP_PROXY（CI / 沙箱常见），axios 会把请求走代理转发，
  * 请求行会变成绝对形式。mock 服务已做兼容，无需额外设置 NO_PROXY。
  */
-import test, { before, beforeEach, after } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import config from '../config/index.js';
@@ -107,51 +107,48 @@ function startMockServer() {
 
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
+      server.unref(); // 不阻塞测试进程退出，无需显式 close
       const { port } = server.address();
-      resolve({
-        base: `http://127.0.0.1:${port}`,
-        close: () => new Promise((r) => server.close(r)),
-      });
+      resolve({ base: `http://127.0.0.1:${port}` });
     });
   });
 }
 
 // ===== 夹具 =====
 
+// Node 18 的 test runner：顶层 before/after 不执行，顶层 await 与异步 hook 中
+// server.listen 会死锁。mock 服务改为用例内懒初始化，配置还原挂到 process exit。
 let mock;
 const realUrls = {};
 
-before(async () => {
-  // 预热重量级懒加载依赖。cheerio 的首次 import 在冷缓存 / 受限环境里可能要几十秒，
-  // 而网页兜底是"先 import cheerio、再发 HTTP 请求"——如果让这段加载卡在中间，
-  // 本地 mock 的连接会被拖到被重置（表现为 ECONNRESET），测试就会假失败。
-  // 在正常机器上这一步只要 ~100ms，等于空操作。
-  await import('cheerio');
-
-  mock = await startMockServer();
-  for (const key of Object.keys(config.crawler)) {
-    if (typeof config.crawler[key] === 'string' && config.crawler[key].startsWith('http')) {
-      realUrls[key] = config.crawler[key];
+async function ensureMock() {
+  if (!mock) {
+    await import('cheerio'); // 预热懒加载依赖，避免首次加载拖垮本地 mock 连接
+    mock = await startMockServer();
+    for (const key of Object.keys(config.crawler)) {
+      if (typeof config.crawler[key] === 'string' && config.crawler[key].startsWith('http')) {
+        realUrls[key] = config.crawler[key];
+      }
     }
+    process.on('exit', () => Object.assign(config.crawler, realUrls));
   }
-});
-
-// 每个用例开始前，把所有接口地址指向一个 404 路径。
-// 这样"忘了覆盖某个 URL"只会得到一次快速 404，而不会去打真实网络、白等 15s 超时。
-beforeEach(() => {
+  // 每个用例开始前，把所有接口地址指向一个 404 路径。
+  // 这样"忘了覆盖某个 URL"只会得到一次快速 404，而不会去打真实网络、白等 15s 超时。
   for (const key of Object.keys(realUrls)) {
     config.crawler[key] = `${mock.base}/nope`;
   }
-});
+}
 
-after(async () => {
-  Object.assign(config.crawler, realUrls);
-  await mock.close();
-});
+// 用例统一入口：先确保 mock 就绪再执行用例体
+const t = (name, fn) =>
+  test(name, async () => {
+    await ensureMock();
+    await fn();
+  });
 
 // ===== 微博 =====
 
-test('微博官方 API：正常解析、过滤广告、排名不跳号、清洗 HTML', async () => {
+t('微博官方 API：正常解析、过滤广告、排名不跳号、清洗 HTML', async () => {
   config.crawler.weiboUrl = `${mock.base}/weibo-official`;
   const { getWeiboHot } = await import('../src/crawlers/weibo.js');
 
@@ -174,7 +171,7 @@ test('微博官方 API：正常解析、过滤广告、排名不跳号、清洗 
 
 // 背景信息为空的后果比"少一点上下文"严重得多：提示词里【背景】和【标题】是同一句话，
 // 模型等于在零信息下写作，只能靠猜——实测微博官方接口 51/51 条都是这样。
-test('微博官方 API：note 只是标题的副本时，摘要不能重复标题', async () => {
+t('微博官方 API：note 只是标题的副本时，摘要不能重复标题', async () => {
   config.crawler.weiboUrl = `${mock.base}/weibo-note-dup`;
   const { getWeiboHot } = await import('../src/crawlers/weibo.js');
 
@@ -206,7 +203,7 @@ test('微博官方 API：note 只是标题的副本时，摘要不能重复标�
   assert.equal(noNote.summary, '热度 30.0万');
 });
 
-test('微博降级：官方接口失败时回退到第三方接口', async () => {
+t('微博降级：官方接口失败时回退到第三方接口', async () => {
   // weiboUrl 保持 beforeEach 给的 404，只把第三方接口指向 mock
   config.crawler.weiboFallbackUrl = `${mock.base}/weibo-tenapi`;
   const { getWeiboHot } = await import('../src/crawlers/weibo.js');
@@ -219,7 +216,7 @@ test('微博降级：官方接口失败时回退到第三方接口', async () =>
   assert.equal(topics[0].summary, '热度 123.5万', '第三方接口只有热度是新信息，别把标题和排名再抄一遍');
 });
 
-test('微博降级：官方与第三方都失败时用网页解析兜底', async () => {
+t('微博降级：官方与第三方都失败时用网页解析兜底', async () => {
   config.crawler.weiboBackupUrl = `${mock.base}/weibo-backup`;
   const { getWeiboHot } = await import('../src/crawlers/weibo.js');
 
@@ -233,7 +230,7 @@ test('微博降级：官方与第三方都失败时用网页解析兜底', async
   );
 });
 
-test('微博三级兜底全部失败时返回空数组，而不是抛错', async () => {
+t('微博三级兜底全部失败时返回空数组，而不是抛错', async () => {
   // 三个 URL 都停在 beforeEach 给的 404
   const { getWeiboHot } = await import('../src/crawlers/weibo.js');
 
@@ -245,7 +242,7 @@ test('微博三级兜底全部失败时返回空数组，而不是抛错', async
 // ===== 抖音 =====
 // 注意：getDouyinHot 里有 1~3s 的随机延迟（模拟真实访问、规避风控），所以这几个用例会慢一些。
 
-test('抖音 Web API：正常解析、label_type 映射成爆点标签、排名不跳号', async () => {
+t('抖音 Web API：正常解析、label_type 映射成爆点标签、排名不跳号', async () => {
   config.crawler.douyinUrl = `${mock.base}/douyin-web`;
   const { getDouyinHot } = await import('../src/crawlers/douyin.js');
 
@@ -259,7 +256,7 @@ test('抖音 Web API：正常解析、label_type 映射成爆点标签、排名�
   assert.equal(topics[0].summary, '【爆】500.0万次讨论', '抖音摘要同样不该重复标题与排名');
 });
 
-test('抖音降级：Web API 失败时回退到移动端接口', async () => {
+t('抖音降级：Web API 失败时回退到移动端接口', async () => {
   // douyinUrl 保持 404，只把移动端接口指向 mock
   config.crawler.douyinMobileUrl = `${mock.base}/douyin-mobile`;
   const { getDouyinHot } = await import('../src/crawlers/douyin.js');
@@ -271,7 +268,7 @@ test('抖音降级：Web API 失败时回退到移动端接口', async () => {
   assert.equal(topics[0].viralLabel, '热', 'label_type 2→热');
 });
 
-test('抖音三级兜底全部失败时返回空数组', async () => {
+t('抖音三级兜底全部失败时返回空数组', async () => {
   const { getDouyinHot } = await import('../src/crawlers/douyin.js');
 
   const topics = await getDouyinHot(5);

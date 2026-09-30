@@ -381,7 +381,7 @@ async function main() {
       ws.init(agent);
       ws.startWebSocket();
 
-      const webServer = await import('./web/server.js');
+      const webServer = await import('./server/server.js');
       resources.servers.push(webServer.start(agent));
       break;
     }
@@ -393,13 +393,13 @@ async function main() {
       srv.init(agent);
       resources.servers.push(srv.startLocalServer());
 
-      const webServer = await import('./web/server.js');
+      const webServer = await import('./server/server.js');
       resources.servers.push(webServer.start(agent));
       break;
     }
 
     case 'web': {
-      const webServer = await import('./web/server.js');
+      const webServer = await import('./server/server.js');
       resources.servers.push(webServer.start(agent));
       break;
     }

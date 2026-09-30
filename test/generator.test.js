@@ -9,7 +9,7 @@
  *   - 必须算出人味分
  *   - 分数不达标时要带着问题清单重写一轮，并且最终返回的是**分更高的那一版**
  */
-import test, { before, after, beforeEach } from 'node:test';
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import config from '../config/index.js';
@@ -89,65 +89,66 @@ function startMockServer() {
 
   return new Promise((resolve) => {
     server.listen(0, '127.0.0.1', () => {
-      resolve({ server, base: `http://127.0.0.1:${server.address().port}` });
+      server.unref(); // 不阻塞测试进程退出，无需显式 close
+      resolve({ base: `http://127.0.0.1:${server.address().port}` });
     });
   });
 }
 
+// Node 18 的 test runner：顶层 before/after 不执行，顶层 await 与异步 hook 中
+// server.listen 会死锁。mock 服务改为用例内懒初始化，配置还原挂到 process exit。
 let mock;
-let saved;
 let generateArticle;
+const saved = {};
 
-before(async () => {
-  // 预热懒加载依赖：沙箱里首次 import 很慢，会把本地连接拖到被重置
-  await import('axios');
-  const mod = await import('../src/ai/generator.js');
-  generateArticle = mod.generateArticle;
+async function ensureMock() {
+  if (!mock) {
+    await import('axios'); // 预热懒加载依赖，避免首次加载拖垮本地 mock 连接
+    ({ generateArticle } = await import('../src/ai/generator.js'));
 
-  mock = await startMockServer();
+    mock = await startMockServer();
 
-  saved = {
-    provider: config.ai.provider,
-    doubaoKey: config.ai.doubaoKey,
-    doubaoBaseUrl: config.ai.doubaoBaseUrl,
-    maxRetries: config.ai.maxRetries,
-    frequencyPenalty: config.ai.frequencyPenalty,
-    presencePenalty: config.ai.presencePenalty,
-    style: config.articleStyle.style,
-    temperature: config.articleStyle.temperature,
-    humanize: config.articleStyle.humanize,
-    minHumanScore: config.articleStyle.minHumanScore,
-    rewriteRounds: config.articleStyle.rewriteRounds,
-    totalBudgetMs: config.articleStyle.totalBudgetMs,
-  };
+    Object.assign(saved, {
+      provider: config.ai.provider,
+      doubaoKey: config.ai.doubaoKey,
+      doubaoBaseUrl: config.ai.doubaoBaseUrl,
+      maxRetries: config.ai.maxRetries,
+      frequencyPenalty: config.ai.frequencyPenalty,
+      presencePenalty: config.ai.presencePenalty,
+      style: config.articleStyle.style,
+      temperature: config.articleStyle.temperature,
+      humanize: config.articleStyle.humanize,
+      minHumanScore: config.articleStyle.minHumanScore,
+      rewriteRounds: config.articleStyle.rewriteRounds,
+      totalBudgetMs: config.articleStyle.totalBudgetMs,
+    });
 
-  config.ai.provider = 'doubao';
-  config.ai.doubaoKey = 'test-key';
-  config.ai.doubaoBaseUrl = mock.base;
-  config.ai.maxRetries = 0; // 失败就别退避重试了，测试要快
-});
+    config.ai.provider = 'doubao';
+    config.ai.doubaoKey = 'test-key';
+    config.ai.doubaoBaseUrl = mock.base;
+    config.ai.maxRetries = 0; // 失败就别退避重试了，测试要快
 
-after(async () => {
-  Object.assign(config.ai, {
-    provider: saved.provider,
-    doubaoKey: saved.doubaoKey,
-    doubaoBaseUrl: saved.doubaoBaseUrl,
-    maxRetries: saved.maxRetries,
-    frequencyPenalty: saved.frequencyPenalty,
-    presencePenalty: saved.presencePenalty,
-  });
-  Object.assign(config.articleStyle, {
-    style: saved.style,
-    temperature: saved.temperature,
-    humanize: saved.humanize,
-    minHumanScore: saved.minHumanScore,
-    rewriteRounds: saved.rewriteRounds,
-    totalBudgetMs: saved.totalBudgetMs,
-  });
-  await new Promise((r) => mock.server.close(r));
-});
+    process.on('exit', () => {
+      Object.assign(config.ai, {
+        provider: saved.provider,
+        doubaoKey: saved.doubaoKey,
+        doubaoBaseUrl: saved.doubaoBaseUrl,
+        maxRetries: saved.maxRetries,
+        frequencyPenalty: saved.frequencyPenalty,
+        presencePenalty: saved.presencePenalty,
+      });
+      Object.assign(config.articleStyle, {
+        style: saved.style,
+        temperature: saved.temperature,
+        humanize: saved.humanize,
+        minHumanScore: saved.minHumanScore,
+        rewriteRounds: saved.rewriteRounds,
+        totalBudgetMs: saved.totalBudgetMs,
+      });
+    });
+  }
 
-beforeEach(() => {
+  // 每个用例前从干净状态开始（原 beforeEach）
   state.queue = [];
   state.requests = [];
   state.rawMode = false;
@@ -158,11 +159,18 @@ beforeEach(() => {
   config.articleStyle.minHumanScore = 70;
   config.articleStyle.temperature = 0.9;
   config.articleStyle.totalBudgetMs = 600_000;
-});
+}
+
+// 用例统一入口：先确保 mock 就绪再执行用例体
+const t = (name, fn) =>
+  test(name, async () => {
+    await ensureMock();
+    await fn();
+  });
 
 const TOPIC = { id: 't1', title: '测试话题', summary: '测试背景', source: 'weibo', rank: 1 };
 
-test('正常生成：解析 JSON、注入尾部、算出人味分', async () => {
+t('正常生成：解析 JSON、注入尾部、算出人味分', async () => {
   state.queue = [GOOD_BODY];
   const article = await generateArticle(TOPIC);
 
@@ -174,7 +182,7 @@ test('正常生成：解析 JSON、注入尾部、算出人味分', async () => 
   assert.equal(article.style, 'default');
 });
 
-test('去AI味后处理生效：套话被替换掉', async () => {
+t('去AI味后处理生效：套话被替换掉', async () => {
   state.queue = ['<p>综上所述，在当今社会，这个话题不得不说值得关注。</p>'];
   const article = await generateArticle(TOPIC);
 
@@ -183,7 +191,7 @@ test('去AI味后处理生效：套话被替换掉', async () => {
   assert.ok(!article.contentHtml.includes('不得不说'));
 });
 
-test('humanize 关闭时正文原样保留', async () => {
+t('humanize 关闭时正文原样保留', async () => {
   config.articleStyle.humanize = false;
   state.queue = ['<p>综上所述，这个话题值得关注。</p>'];
   const article = await generateArticle(TOPIC);
@@ -191,7 +199,7 @@ test('humanize 关闭时正文原样保留', async () => {
   assert.ok(article.contentHtml.includes('综上所述'));
 });
 
-test('单篇预算用尽时不再开重写轮次（对照组：预算充足会重写）', async () => {
+t('单篇预算用尽时不再开重写轮次（对照组：预算充足会重写）', async () => {
   config.articleStyle.rewriteRounds = 1;
   config.articleStyle.minHumanScore = 100; // 第 0 轮必然"不达标"，正常情况下会触发重写
   state.queue = [BAD_BODY, BAD_BODY];
@@ -214,7 +222,7 @@ test('单篇预算用尽时不再开重写轮次（对照组：预算充足会�
   assert.equal(typeof article.humanScore, 'number');
 });
 
-test('采样参数随请求发出（温度 / 惩罚项）', async () => {
+t('采样参数随请求发出（温度 / 惩罚项）', async () => {
   config.articleStyle.temperature = 0.95;
   state.queue = [GOOD_BODY];
   await generateArticle(TOPIC);
@@ -226,7 +234,7 @@ test('采样参数随请求发出（温度 / 惩罚项）', async () => {
   assert.equal(sent.model, config.ai.doubaoModel);
 });
 
-test('人味分不达标时带问题清单重写，并返回分更高的那一版', async () => {
+t('人味分不达标时带问题清单重写，并返回分更高的那一版', async () => {
   config.articleStyle.rewriteRounds = 1;
   state.queue = [BAD_BODY, GOOD_BODY];
 
@@ -242,7 +250,7 @@ test('人味分不达标时带问题清单重写，并返回分更高的那一�
   assert.ok(article.humanScore > 70, `重写后应达标，实际 ${article.humanScore}`);
 });
 
-test('达标时不触发重写', async () => {
+t('达标时不触发重写', async () => {
   config.articleStyle.rewriteRounds = 2;
   state.queue = [GOOD_BODY];
 
@@ -250,7 +258,7 @@ test('达标时不触发重写', async () => {
   assert.equal(state.requests.length, 1);
 });
 
-test('重写后仍不达标时，返回分最高的那一版而不是 null', async () => {
+t('重写后仍不达标时，返回分最高的那一版而不是 null', async () => {
   config.articleStyle.rewriteRounds = 1;
   state.queue = [BAD_BODY];
 
@@ -261,7 +269,7 @@ test('重写后仍不达标时，返回分最高的那一版而不是 null', asy
   assert.ok(article.humanScore < 70);
 });
 
-test('段落打散只在提分时保留，不会把分数改差', async () => {
+t('段落打散只在提分时保留，不会把分数改差', async () => {
   state.queue = [GOOD_BODY];
   const article = await generateArticle(TOPIC);
 
@@ -274,7 +282,7 @@ test('段落打散只在提分时保留，不会把分数改差', async () => {
   );
 });
 
-test('模型没输出 JSON 时走容错解析，仍能捞回正文', async () => {
+t('模型没输出 JSON 时走容错解析，仍能捞回正文', async () => {
   state.rawMode = true;
   state.queue = ['抱歉，我直接写正文：<p>这是没有 JSON 结构的正文内容，但是长度足够被识别成段落。</p>'];
   const article = await generateArticle(TOPIC);
@@ -285,7 +293,7 @@ test('模型没输出 JSON 时走容错解析，仍能捞回正文', async () =>
   assert.ok(!/<p[^>]*>\s*<p/i.test(article.contentHtml), '不应套出嵌套 <p>');
 });
 
-test('容错解析路径同样要做去AI味处理，不能静默跳过整条反检测链路', async () => {
+t('容错解析路径同样要做去AI味处理，不能静默跳过整条反检测链路', async () => {
   state.rawMode = true;
   state.queue = [
     '好吧我直接写：<p>综上所述，在当今社会，这类话题无疑是值得我们深入思考的，而且这段话得足够长才能被容错解析识别成一个段落。</p>',
@@ -299,7 +307,7 @@ test('容错解析路径同样要做去AI味处理，不能静默跳过整条反
   assert.ok(article.humanReport, '容错路径也要产出体检报告');
 });
 
-test('容错解析路径不能把固定尾部注入两次', async () => {
+t('容错解析路径不能把固定尾部注入两次', async () => {
   state.rawMode = true;
   state.queue = ['<p>这是一段没有 JSON 结构的正文，长度足够被容错解析当成一个正常段落来处理。</p>'];
   const article = await generateArticle(TOPIC);
@@ -308,7 +316,7 @@ test('容错解析路径不能把固定尾部注入两次', async () => {
   assert.equal(footerCount, 1, `尾部应只出现一次，实际 ${footerCount} 次`);
 });
 
-test('重写反而更差时，返回第一版而不是更差的第二版', async () => {
+t('重写反而更差时，返回第一版而不是更差的第二版', async () => {
   // 先分别测出两版各自的最终分（rewriteRounds=0 → 只生成一版）
   config.articleStyle.rewriteRounds = 0;
   state.queue = [BAD_BODY];
@@ -332,7 +340,7 @@ test('重写反而更差时，返回第一版而不是更差的第二版', async
   assert.equal(article.humanScore, first.humanScore, '应保留分更高的第一版，而不是更差的第二版');
 });
 
-test('模型输出被截断时明确失败，不把半成品当成功', async () => {
+t('模型输出被截断时明确失败，不把半成品当成功', async () => {
   // 模拟撞上 max_tokens：响应被切断，返回的 JSON 一定是残缺的
   state.finishReason = 'length';
   state.queue = ['{"title":"半截标题","digest":"半截摘要","contentHtml":"<p>这篇文章写到一半就断了'];
@@ -342,7 +350,7 @@ test('模型输出被截断时明确失败，不把半成品当成功', async ()
   assert.equal(article, null, '截断应判为失败——半成品绝不能推进草稿箱');
 });
 
-test('截断错误不重试：参数没变，重试只会再截断一次', async () => {
+t('截断错误不重试：参数没变，重试只会再截断一次', async () => {
   config.ai.maxRetries = 2; // 调高重试次数，用来验证它确实没被重试
   state.finishReason = 'length';
   state.queue = ['<p>随便一段。</p>'];
@@ -370,7 +378,7 @@ async function captureTopicBlock(topic) {
   return user.slice(start, end);
 }
 
-test('摘要为空时整行不输出，而不是留一个空的"背景："', async () => {
+t('摘要为空时整行不输出，而不是留一个空的"背景："', async () => {
   const block = await captureTopicBlock({ ...TOPIC, summary: '' });
 
   assert.ok(block.includes('标题：测试话题'), '标题行必须还在');
@@ -381,7 +389,7 @@ test('摘要为空时整行不输出，而不是留一个空的"背景："', asy
   );
 });
 
-test('有摘要时"背景"行正常输出', async () => {
+t('有摘要时"背景"行正常输出', async () => {
   const block = await captureTopicBlock({ ...TOPIC, summary: '热度 60.0万' });
 
   assert.ok(block.includes('背景：热度 60.0万'), `实际：\n${block}`);
@@ -397,7 +405,7 @@ test('有摘要时"背景"行正常输出', async () => {
  * 也就是说：这条要求 + 这个指标，合起来是在**奖励编造**。
  * 下面几句就是把这个漏洞堵上，删掉任何一句都会让模型重新有动力去编。
  */
-test('提示词明确禁止为了"具体"而编造数字与当事人原话', async () => {
+t('提示词明确禁止为了"具体"而编造数字与当事人原话', async () => {
   const system = await captureSystemPrompt();
 
   assert.ok(system.includes('绝不等于'), '应点明"具体"不等于"编造"');
@@ -412,7 +420,7 @@ test('提示词明确禁止为了"具体"而编造数字与当事人原话', asy
  * 它不判定造假（文章引用真实公共事实也会被列出来），价值在于让编造**看得见**——
  * 在此之前，模型编的"维修报价 4680 元"会一路静默地推进草稿箱，而自检分还很高。
  */
-test('生成后附上"无法从输入溯源"的具体信息，供人工核对', async () => {
+t('生成后附上"无法从输入溯源"的具体信息，供人工核对', async () => {
   state.queue = ['<p>这个词条热度 272.6 万，排在第1位，维修报价 4680 元。</p>'];
 
   const article = await generateArticle({
@@ -431,7 +439,7 @@ test('生成后附上"无法从输入溯源"的具体信息，供人工核对', 
   assert.ok(!numbers.includes('1'), '输入里已有的排名不该被标出');
 });
 
-test('话题输入能解释正文里的数字时，不产生可疑项', async () => {
+t('话题输入能解释正文里的数字时，不产生可疑项', async () => {
   state.queue = ['<p>热度 272.6 万，排在第1位。</p>'];
 
   const article = await generateArticle({
@@ -445,7 +453,7 @@ test('话题输入能解释正文里的数字时，不产生可疑项', async ()
   assert.deepEqual(article.untraceableSpecifics.numbers, [], '数字都能溯源时列表应为空');
 });
 
-test('提示词里的阈值直接引用 HUMANITY_TARGETS，改阈值不用改两处', async () => {
+t('提示词里的阈值直接引用 HUMANITY_TARGETS，改阈值不用改两处', async () => {
   const system = await captureSystemPrompt();
   const T = HUMANITY_TARGETS;
 
