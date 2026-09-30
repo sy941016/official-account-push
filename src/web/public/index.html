@@ -2,7 +2,9 @@
 <html lang="zh-CN" data-page-node-id="92ZpuT7NXLxooF5dzPdYP8">
 <head data-page-node-id="IeCoq5YKCsnirX8QMNeoWf">
 <meta charset="UTF-8" data-page-node-id="1jxnH7MWnRWJTRA1kOzhnq">
-<meta name="viewport" content="width=device-width, initial-scale=1.0" data-page-node-id="gHVyBOm1bYleSSHTAlOhtN">
+<!-- viewport-fit=cover 让刘海屏能拿到安全区；interactive-widget=resizes-content 让安卓软键盘弹出时布局视口跟着缩，
+     否则输入框会被键盘盖住 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" data-page-node-id="gHVyBOm1bYleSSHTAlOhtN">
 <meta name="color-scheme" content="light dark" data-page-node-id="1tbUlNDa65viDns57fvs7V">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307c160'/%3E%3Cpath d='M25 15.5a7.4 7.4 0 0 1-8 7.4 8 8 0 0 1-2.8-.5L9 25l1.6-4.4A7.2 7.2 0 0 1 10 17.4a7.4 7.4 0 0 1 8-7.4 7.4 7.4 0 0 1 7 7.5Z' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <title>公众号内容助手 · AI Agent</title>
@@ -37,6 +39,11 @@
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
             "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
     --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    /* 刘海 / 灵动岛 / 底部小横条留出的安全区，非全面屏机型全部为 0 */
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -68,7 +75,11 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  html, body { height: 100%; }
+  html {
+    height: 100%;
+    /* 手机上默认的灰色点按高亮和这套按钮风格不搭，改由各自的 :active 给反馈 */
+    -webkit-tap-highlight-color: transparent;
+  }
 
   body {
     font-family: var(--font);
@@ -77,9 +88,21 @@
     font-size: 14px;
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
+    /* 横屏时禁止 iOS 自行放大字号 */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    height: 100%;
+    overscroll-behavior: none;
+  }
+
+  /* 移动端地址栏收起/展开时 100% 不跟随，dvh 才跟随；软键盘弹起时再由 JS 写入的 --app-h 接管。
+     必须包在 @supports 里：支持 var() 但不支持 dvh 的老浏览器（Chrome 49~107）会把整条声明
+     判成 invalid at computed-value time，height 直接变回 auto，整个布局会塌掉。 */
+  @supports (height: 100dvh) {
+    body { height: var(--app-h, 100dvh); }
   }
 
   /* ============ 顶栏 ============ */
@@ -89,7 +112,7 @@
     align-items: center;
     justify-content: space-between;
     gap: 16px;
-    padding: 14px 28px;
+    padding: calc(14px + var(--safe-t)) calc(28px + var(--safe-r)) 14px calc(28px + var(--safe-l));
     background: color-mix(in srgb, var(--surface) 82%, transparent);
     backdrop-filter: saturate(180%) blur(14px);
     -webkit-backdrop-filter: saturate(180%) blur(14px);
@@ -129,6 +152,11 @@
   }
 
   .topbar-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+
+  /* 顶栏按钮的长短两套文案：窄屏用短的，否则"公众号内容助手"标题会被挤到截断 */
+  .narrow-only { display: none; }
+  /* 标题也有长短两套，见下面的窄屏断点 */
+  .title-short { display: none; }
 
   .status-pill {
     display: inline-flex;
@@ -204,6 +232,9 @@
     overflow-x: hidden;
     scroll-behavior: smooth;
     position: relative;
+    -webkit-overflow-scrolling: touch;
+    /* 手机上下拉到顶/底时不要把滚动传给页面（否则会触发下拉刷新） */
+    overscroll-behavior: contain;
   }
   .chat-scroll::-webkit-scrollbar { width: 10px; }
   .chat-scroll::-webkit-scrollbar-thumb {
@@ -462,7 +493,7 @@
   .to-bottom {
     position: absolute;
     left: 50%;
-    bottom: 22px;
+    bottom: calc(22px + var(--safe-b));
     transform: translate(-50%, 10px);
     width: 34px;
     height: 34px;
@@ -484,7 +515,7 @@
   /* ============ 输入区 ============ */
   .composer-wrap {
     flex: none;
-    padding: 8px 0 22px;
+    padding: 8px 0 calc(22px + var(--safe-b));
   }
   /* 内边距要和 .chat 一致，否则输入框的左右边缘会跟正文内容错开 */
   .composer { max-width: 820px; margin: 0 auto; padding: 0 28px; }
@@ -581,22 +612,108 @@
 
   :focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
 
+  /* ============ 触屏设备（手机 / 平板）============
+     按"有没有 hover"判断，和屏宽无关：
+     横屏手机、iPad 这类宽屏触屏设备同样需要这套规则。
+     必须放在所有基础样式之后，否则会被同优先级的后置规则盖掉。 */
+  @media (hover: none) {
+    /* 触屏没有 hover，复制按钮得常驻，否则手机上永远点不到 */
+    .row.agent .bubble-wrap .msg-tools { opacity: 1; }
+    .tool-btn { height: 30px; padding: 0 12px; font-size: 12.5px; }
+    .tool-btn:active { color: var(--text); border-color: var(--border-strong); }
+
+    /* 手指的点按目标比鼠标大一号 */
+    .btn { height: 34px; padding: 0 12px; }
+    .chip { height: 34px; padding: 0 13px; }
+    .chip:active:not(:disabled) { transform: scale(.97); }
+    .btn-send { height: 40px; padding: 0 15px; border-radius: 13px; }
+
+    /* 输入框字号 <16px 时 iOS 聚焦会自动把整页放大，触屏一律给到 16px */
+    #messageInput { font-size: 16px; }
+
+    /* Enter / Shift+Enter 的快捷键提示在触屏上没有意义 */
+    .composer-hint { display: none; }
+  }
+
+  /* ============ 手机端（窄屏）============
+     布局按屏宽切换：窄屏走移动端，宽屏走 PC 端。 */
   @media (max-width: 640px) {
-    .topbar { padding: 12px 16px; }
+    .topbar {
+      padding: 10px calc(14px + var(--safe-r)) 10px calc(14px + var(--safe-l));
+      gap: 10px;
+    }
+    .brand-mark { width: 34px; height: 34px; border-radius: 10px; }
     .brand-text p { display: none; }
-    .chat { padding: 22px 16px 30px; gap: 18px; }
-    .composer-wrap { padding: 8px 0 16px; }
-    .composer { padding: 0 16px; }
-    .bubble-wrap { max-width: 88%; }
+
+    /* 顶栏四个元素（品牌 + 账号 + 两个按钮）在 360px 宽的手机上放不下长文案 */
+    .wide-only { display: none; }
+    .narrow-only { display: inline; }
+
+    .chat { padding: 18px calc(14px + var(--safe-r)) 26px calc(14px + var(--safe-l)); gap: 16px; }
+
+    .composer-wrap { padding: 6px 0 calc(14px + var(--safe-b)); }
+    .composer { padding: 0 calc(14px + var(--safe-r)) 0 calc(14px + var(--safe-l)); }
+
+    .bubble-wrap { max-width: 90%; }
+    .bubble { padding: 11px 14px; }
     .status-pill { display: none; }
     /* 窄屏只留头像，省出横向空间给"清空会话 / 退出登录" */
     .user-chip { padding-right: 5px; }
     .user-chip #userName { display: none; }
+
+    /* 窄屏竖向空间紧张，输入框最多长到 120px 就自己滚 */
+    #messageInput { max-height: 120px; }
+
+    /* 快捷问题改成单行横滑，别占掉三行竖向空间 */
+    .chips {
+      flex-wrap: nowrap;
+      overflow-x: auto;
+      margin: 0 calc(-14px - var(--safe-r)) 10px calc(-14px - var(--safe-l));
+      padding: 2px calc(14px + var(--safe-r)) 4px calc(14px + var(--safe-l));
+      scrollbar-width: none;
+      -webkit-overflow-scrolling: touch;
+      overscroll-behavior-x: contain;
+    }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; }
+
+    /* 欢迎卡片压缩，别一屏全是它 */
+    .bubble--welcome { padding: 16px; }
+    .bubble--welcome h2 { font-size: 15.5px; }
+    .bubble--welcome .lead { font-size: 13px; margin-bottom: 14px; }
+    .bubble--welcome .tip { margin-top: 13px; padding-top: 12px; font-size: 12px; }
+    .cap { padding: 9px 11px; gap: 10px; }
+    .cap span { font-size: 12px; }
+
+    /* 执行过程卡片不再缩进，窄屏上每一像素都要省 */
+    .steps { margin-left: 0; }
+    .step { padding: 7px 12px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
     .chat-scroll { scroll-behavior: auto; }
+  }
+
+  /* 矮屏（横屏手机，或软键盘占掉大半屏幕时）：竖向空间极紧，
+     快捷问题那行直接收起来，保证输入框不被挤出可视区 */
+  @media (max-height: 520px) {
+    .chips { display: none; }
+    .chat { padding-top: 14px; }
+  }
+
+  /* 超窄屏（iPhone SE 1 的 320px 等）：顶栏四个元素横向不够分，
+     完整标题会被挤成「公…」。先换短标题 —— 320px 下实测需要 105px 放完整标题，
+     而只剩 77px 可用。 */
+  @media (max-width: 350px) {
+    .title-full { display: none; }
+    .title-short { display: inline; }
+  }
+
+  /* 折叠屏外屏（约 280px）：连「内容助手」都放不下，标题整体收起，只留品牌图标 */
+  @media (max-width: 310px) {
+    .brand-text { display: none; }
+    .topbar { gap: 8px; }
   }
 </style>
 </head>
@@ -611,7 +728,7 @@
       </svg>
     </div>
     <div class="brand-text" data-page-node-id="fkehUosKDKmLx91GfvHnCe">
-      <h1 data-page-node-id="8BszucOU5FYIZborI8c65D">公众号内容助手</h1>
+      <h1 data-page-node-id="8BszucOU5FYIZborI8c65D"><span class="title-full">公众号内容助手</span><span class="title-short">内容助手</span></h1>
       <p data-page-node-id="YLCArZA80EeP1V0ek8uJkU">热点采集 · AI 写作 · 自动发布</p>
     </div>
   </div>
@@ -621,8 +738,8 @@
       <span class="avatar" id="userAvatar" aria-hidden="true"></span>
       <span id="userName"></span>
     </span>
-    <button class="btn" onclick="resetChat()" data-page-node-id="LIDuO2ABnEDZ2FzmgwNTWx">清空会话</button>
-    <button class="btn" id="logoutBtn" onclick="logout()" hidden>退出登录</button>
+    <button class="btn" onclick="resetChat()" data-page-node-id="LIDuO2ABnEDZ2FzmgwNTWx"><span class="wide-only">清空会话</span><span class="narrow-only">清空</span></button>
+    <button class="btn" id="logoutBtn" onclick="logout()" hidden><span class="wide-only">退出登录</span><span class="narrow-only">退出</span></button>
   </div>
 </header>
 
@@ -687,6 +804,33 @@
   const messageInput = document.getElementById('messageInput');
   const sendBtn = document.getElementById('sendBtn');
   const toBottom = document.getElementById('toBottom');
+
+  /* ============ 设备形态 ============
+     布局本身由 CSS 媒体查询按屏宽切换；这里只做 JS 侧的形态判定，
+     给 <html> 打上标记，用来调整那些 CSS 表达不了的东西（占位文案、软键盘）。
+     阈值必须和下面 max-width: 640px 的断点保持一致，否则会出现
+     "用的是窄屏布局、却按 PC 端处理"这种自相矛盾的状态。 */
+  const NARROW_BREAKPOINT = 640;
+  const IS_TOUCH = (window.matchMedia?.('(hover: none) and (pointer: coarse)').matches)
+    || (navigator.maxTouchPoints > 0 && 'ontouchstart' in window);
+  const LONG_PLACEHOLDER = messageInput.placeholder;
+  const SHORT_PLACEHOLDER = '说说你想做什么…';
+
+  /**
+   * 形态标记 + 占位文案。
+   * 窄屏（手机）→ 移动端，电脑和 iPad / 横屏手机这类宽屏设备 → PC 端。
+   * 手机横竖屏切换会跨过断点，所以 resize 时要重算，不能只在加载时算一次。
+   */
+  function syncDevice() {
+    const device = window.innerWidth <= NARROW_BREAKPOINT ? 'mobile' : 'desktop';
+    document.documentElement.dataset.device = device;
+    // 长占位文案在窄屏上会折行、被单行高的输入框裁掉，换成短的
+    messageInput.placeholder = device === 'mobile' ? SHORT_PLACEHOLDER : LONG_PLACEHOLDER;
+  }
+
+  document.documentElement.dataset.touch = IS_TOUCH ? 'yes' : 'no';
+  syncDevice();
+  window.addEventListener('resize', syncDevice);
 
   // 会话 ID 每次刷新都换一个，避免和上一次的上下文串台
   const sessionId = 'web_' + Math.random().toString(36).slice(2, 10);
@@ -1054,7 +1198,7 @@
       addNotice('网络错误：' + err.message);
     } finally {
       setBusy(false);
-      messageInput.focus();
+      focusInput();
     }
   }
 
@@ -1082,7 +1226,7 @@
       chatContainer.innerHTML = '';
       renderWelcome();
       scrollToBottom(true);
-      messageInput.focus();
+      focusInput();
     } catch (err) {
       addNotice('清空失败：' + err.message);
     }
@@ -1099,17 +1243,62 @@
       pill.classList.toggle('is-ok', ok);
       pill.classList.toggle('is-bad', !ok);
       label.textContent = ok ? (data.agentReady ? '服务就绪' : 'Agent 未初始化') : '服务异常';
+      if (!ok) noticeOfflineOnce();
     } catch {
       pill.classList.add('is-bad');
       label.textContent = '后端未连接';
+      noticeOfflineOnce();
     }
+  }
+
+  /**
+   * 连不上后端时在对话区提示一次。
+   * 顶栏那个状态点在手机上是被隐藏的，不额外说一句的话，用户只会看到
+   * 一个"正常"的页面、然后发消息时才发现发不出去。
+   */
+  let offlineNoticed = false;
+  function noticeOfflineOnce() {
+    if (offlineNoticed) return;
+    offlineNoticed = true;
+    addNotice('连不上后端服务。请确认已运行 npm run web，并从服务地址打开本页（本机 http://localhost:3000，手机用 http://电脑局域网IP:3000）');
+  }
+
+  /* ============ 手机端适配 ============ */
+
+  /** 触屏设备不主动抢焦点：会立刻弹起软键盘，把刚生成的长回答挤掉大半 */
+  function focusInput() {
+    if (!IS_TOUCH) messageInput.focus();
+  }
+
+  /**
+   * 软键盘高度同步。
+   * iOS 的 100dvh 不随软键盘变化，键盘弹出时整块布局留在原地，输入框会被盖住。
+   * 这里把 visualViewport 的真实高度写进 --app-h，让 body 跟着收缩。
+   */
+  function watchKeyboard() {
+    const vv = window.visualViewport;
+    if (!IS_TOUCH || !vv) return;
+
+    const sync = () => {
+      // 双指缩放时 visualViewport 会小于布局视口，跟着缩会让整页跳动，直接跳过
+      if (vv.scale !== 1) return;
+      document.documentElement.style.setProperty('--app-h', vv.height + 'px');
+      // 键盘弹出时 iOS 会把页面整体上顶，抵消掉，让布局自己收缩而不是被推走
+      if (vv.offsetTop) window.scrollTo(0, 0);
+      scrollToBottom();
+    };
+
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    sync();
   }
 
   renderWelcome();
   pingHealth();
   loadMe();
+  watchKeyboard();
   setInterval(pingHealth, 60000);
-  messageInput.focus();
+  focusInput();
 </script>
 </body>
 </html>

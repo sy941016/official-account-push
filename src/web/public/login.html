@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- viewport-fit=cover 让刘海屏能拿到安全区；interactive-widget=resizes-content 让安卓软键盘弹出时布局视口跟着缩，
+     否则输入框会被键盘盖住 -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="light dark">
 <meta name="robots" content="noindex, nofollow">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2307c160'/%3E%3Cpath d='M25 15.5a7.4 7.4 0 0 1-8 7.4 8 8 0 0 1-2.8-.5L9 25l1.6-4.4A7.2 7.2 0 0 1 10 17.4a7.4 7.4 0 0 1 8-7.4 7.4 7.4 0 0 1 7 7.5Z' fill='none' stroke='white' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
@@ -25,6 +27,11 @@
     --shadow-card: 0 24px 60px -24px rgba(16, 24, 40, .22), 0 2px 8px rgba(16, 24, 40, .05);
     --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
             "Hiragino Sans GB", "Microsoft YaHei", Roboto, sans-serif;
+    /* 刘海 / 灵动岛 / 底部小横条留出的安全区，非全面屏机型全部为 0 */
+    --safe-t: env(safe-area-inset-top, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+    --safe-b: env(safe-area-inset-bottom, 0px);
+    --safe-l: env(safe-area-inset-left, 0px);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -58,9 +65,14 @@
     line-height: 1.6;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    /* 横屏时禁止 iOS 自行放大字号 */
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
   }
 
-  .stage { display: flex; min-height: 100%; }
+  /* min-height 用 dvh：移动端地址栏收起/展开时高度跟着变，卡片不会被顶出屏幕。
+     不固定高度，软键盘弹起时页面才有余量滚动把输入框带进可视区。 */
+  .stage { display: flex; min-height: 100%; min-height: 100dvh; }
 
   /* ============ 左侧品牌区 ============ */
   .brand-pane {
@@ -135,7 +147,7 @@
        比 space-between 更稳（不会把文案顶到最底部） */
     justify-content: flex-start;
     gap: 40px;
-    padding: 44px 56px 40px;
+    padding: calc(44px + var(--safe-t)) calc(56px + var(--safe-r)) calc(40px + var(--safe-b)) calc(56px + var(--safe-l));
     color: #eaf3ee;
   }
 
@@ -215,7 +227,7 @@
     flex: 1 1 48%;
     display: grid;
     place-items: center;
-    padding: 48px 32px;
+    padding: calc(48px + var(--safe-t)) calc(32px + var(--safe-r)) calc(48px + var(--safe-b)) calc(32px + var(--safe-l));
     background:
       radial-gradient(ellipse 70% 55% at 78% 12%, color-mix(in srgb, var(--brand) 7%, transparent), transparent 70%),
       var(--bg);
@@ -224,6 +236,10 @@
   .card {
     width: 100%;
     max-width: 396px;
+    /* 这个 min-width:0 不能删。input 有固有宽度（默认 size=20，16px 字号下约 177px），
+       .form-pane 是 flex item，min-width:auto 会顺着这个固有宽度把整列撑到 359px ——
+       在 320px 宽的手机上卡片右侧会被直接切掉（实测溢出 39px）。 */
+    min-width: 0;
     padding: 34px 34px 26px;
     border-radius: 18px;
     background: var(--surface);
@@ -432,7 +448,14 @@
   /* ============ 响应式 ============ */
   @media (max-width: 900px) {
     .brand-pane { display: none; }
-    .form-pane { flex: 1 1 100%; padding: 32px 20px; align-content: center; }
+    .form-pane {
+      flex: 1 1 100%;
+      padding: calc(28px + var(--safe-t)) calc(20px + var(--safe-r)) calc(28px + var(--safe-b)) calc(20px + var(--safe-l));
+      /* safe center：内容比可视区高时改成从顶部开始排，不会把卡片上半截裁掉
+         （软键盘弹起就是这个场景）。浏览器不认 safe 关键字时整条声明失效，
+         退回默认的 stretch，同样是安全的 */
+      align-content: safe center;
+    }
     .card { max-width: 420px; }
 
     .mobile-brand {
@@ -441,6 +464,7 @@
       gap: 11px;
       width: 100%;
       max-width: 420px;
+      min-width: 0; /* 同 .card，别让它被内容撑破 */
       margin: 0 auto 18px;
       animation: riseIn .45s cubic-bezier(.22, .68, .32, 1) both;
     }
@@ -461,10 +485,38 @@
     .mobile-brand span { font-size: 11px; color: var(--text-3); letter-spacing: .06em; }
   }
 
+  /* ============ 触屏设备（手机 / 平板）============
+     按"有没有 hover"判断，和屏宽无关：横屏手机、iPad 同样需要。
+     放在基础样式之后，否则会被同优先级的后置规则盖掉。 */
+  @media (hover: none) {
+    /* 输入框字号 <16px 时 iOS 聚焦会自动把整页放大，触屏一律给到 16px */
+    .control input { font-size: 16px; }
+    /* 手指的点按目标放大一号 */
+    .submit { height: 48px; font-size: 15px; }
+    .peek { width: 34px; height: 34px; }
+    .check { min-height: 34px; }
+  }
+
   @media (max-width: 420px) {
     .card { padding: 26px 22px 20px; border-radius: 16px; }
     .card-head h2 { font-size: 21px; }
     .row { flex-direction: column; align-items: flex-start; gap: 8px; }
+  }
+
+  /* 矮屏（横屏手机、iPhone SE 这类小屏，以及软键盘弹出时）：
+     把卡片竖向尺寸整体压一压。320x568 上原本卡片高 579px、比视口还高 11px，
+     压完约 515px，能一屏放下，不用滚着找「登录」按钮。 */
+  @media (max-width: 900px) and (max-height: 700px) {
+    .form-pane {
+      padding-top: calc(18px + var(--safe-t));
+      padding-bottom: calc(18px + var(--safe-b));
+    }
+    .mobile-brand { margin-bottom: 14px; }
+    .card { padding: 22px 22px 16px; }
+    .card-head { margin-bottom: 18px; }
+    .field { margin-bottom: 13px; }
+    .row { margin: 2px 0 14px; }
+    .card-foot { margin-top: 16px; padding-top: 12px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -644,6 +696,24 @@
 
   let loading = false;
 
+  /* ============ 页面来源自检 ============ */
+  // 这个页面经常被当成静态文件打开（直接双击 html、或在编辑器/预览面板里打开），
+  // 那种情况下 /api/* 压根不存在，登录 100% 失败，但报出来只是"HTTP 404"，
+  // 很容易被误判成密码错。启动时先探一下 /health，把话说清楚。
+  let notServedHint = '';
+
+  async function checkServedByApp() {
+    try {
+      const res = await fetch('/health', { cache: 'no-store' });
+      if (res.ok) return;
+    } catch { /* 探不通 = 没被服务托管 */ }
+
+    notServedHint = location.protocol === 'file:'
+      ? '这是直接打开的本地文件，登录接口不可用。请先运行 npm run web，再访问 http://localhost:3000'
+      : '当前页面不是由服务提供的（找不到 /health），无法登录。请先运行 npm run web，再访问 http://localhost:3000';
+    showAlert(notServedHint);
+  }
+
   function showAlert(message) {
     alertText.textContent = message;
     alertBox.hidden = false;
@@ -676,6 +746,9 @@
   form.addEventListener('submit', async (event) => {
     event.preventDefault();
     if (loading) return;
+
+    // 页面没被服务托管，发出去也是白跑一趟，直接把原因摆出来
+    if (notServedHint) { showAlert(notServedHint); return; }
 
     const username = usernameEl.value.trim();
     const password = passwordEl.value;
@@ -713,6 +786,7 @@
     }
   });
 
+  checkServedByApp();
   usernameEl.focus();
 </script>
 </body>
