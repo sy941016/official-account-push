@@ -239,3 +239,36 @@ export function createDedupeCache(ttlMs = 5 * 60 * 1000, maxSize = 1000) {
     },
   };
 }
+
+/**
+ * 滑动窗口限流器。
+ * 返回一个按 key 计数的检查函数：窗口内超过 limit 次即拒绝，并给出最早可重试秒数。
+ * 桶内时间戳过期即清理；key 数超过 1000 时顺带清扫空桶，防止无界增长。
+ *
+ * @param {number} limit 窗口内允许的次数
+ * @param {number} windowMs 窗口长度（毫秒）
+ * @returns {(key: string) => {allowed: boolean, retryAfterSec?: number}}
+ */
+export function createRateLimiter(limit, windowMs) {
+  const buckets = new Map();
+
+  return (key) => {
+    const now = Date.now();
+    const windowStart = now - windowMs;
+    const hits = (buckets.get(key) || []).filter((t) => t > windowStart);
+
+    if (hits.length >= limit) {
+      buckets.set(key, hits);
+      return { allowed: false, retryAfterSec: Math.max(1, Math.ceil((hits[0] + windowMs - now) / 1000)) };
+    }
+
+    hits.push(now);
+    buckets.set(key, hits);
+    if (buckets.size > 1000) {
+      for (const [k, v] of buckets) {
+        if (!v.length || v[v.length - 1] <= windowStart) buckets.delete(k);
+      }
+    }
+    return { allowed: true };
+  };
+}

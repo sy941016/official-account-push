@@ -41,6 +41,10 @@ const state = {
   hits: [],
   /** 最后一次 draft/add 的请求体 */
   draftBody: null,
+  /** freepublish/submit 是否成功 */
+  publishOk: true,
+  /** 最后一次 freepublish/submit 的请求体 */
+  publishBody: null,
   /** 所有 multipart 上传的元信息 */
   uploads: [],
 };
@@ -165,6 +169,18 @@ function startMockServer() {
       return;
     }
 
+    // ---- 发布草稿（一键发布）----
+    if (pathname === '/cgi-bin/freepublish/submit') {
+      const body = await readRequestBody(req);
+      state.publishBody = JSON.parse(body.toString('utf-8'));
+      if (!state.publishOk) {
+        json({ errcode: 48001, errmsg: 'api unauthorized' });
+        return;
+      }
+      json({ publish_id: 'PUBLISH_ID_001' });
+      return;
+    }
+
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('not found');
   });
@@ -199,6 +215,7 @@ const draftThumb = () => state.draftBody.articles[0].thumb_media_id;
 let server;
 let publishToDraft;
 let resetPublisherCache;
+let publishDraft;
 
 async function ensureMock() {
   if (!server) {
@@ -232,7 +249,7 @@ async function ensureMock() {
     config.image.count = 2;
     config.image.asCover = true;
 
-    ({ publishToDraft, resetPublisherCache } = await import('../src/wechat/publisher.js'));
+    ({ publishToDraft, resetPublisherCache, publishDraft } = await import('../src/wechat/publisher.js'));
 
     process.on('exit', () => {
       config.wechat.apiBase = saved.wechatApiBase;
@@ -263,6 +280,8 @@ async function ensureMock() {
   state.hits.length = 0;
   state.uploads.length = 0;
   state.draftBody = null;
+  state.publishOk = true;
+  state.publishBody = null;
 }
 
 // 用例统一入口：先确保 mock 就绪再执行用例体
@@ -397,4 +416,19 @@ t('配图和素材库都拿不到图：返回 null（封面是硬依赖，不能
 
   assert.equal(draftId, null, '没有封面时必须失败，而不是创建一个没有封面的草稿');
   assert.equal(state.draftBody, null, '不应调用 draft/add');
+});
+
+t('publishDraft 成功：返回 publish_id，请求体带上草稿 media_id', async () => {
+  const publishId = await publishDraft('DRAFT_MEDIA_ID');
+
+  assert.equal(publishId, 'PUBLISH_ID_001');
+  assert.equal(state.publishBody.media_id, 'DRAFT_MEDIA_ID');
+});
+
+t('publishDraft 接口报错（如无发布权限）：返回 null 而不抛错', async () => {
+  state.publishOk = false;
+
+  const publishId = await publishDraft('DRAFT_MEDIA_ID');
+
+  assert.equal(publishId, null, '发布失败应返回 null，让主流程只记日志不中断');
 });

@@ -63,6 +63,14 @@ const WEIBO_BACKUP_HTML = `
   <tr><td class="td-02"><a href="/c">免费领取福利</a></td></tr>
 </table>`;
 
+// 话题搜索页：卡片里带话题导语
+const WEIBO_TOPIC_HTML = `
+<div class="card-topic">
+  <div class="info">
+    <p>暴雨导致多地积水，各地救援力量已赶赴现场处置，气象部门继续发布红色预警。</p>
+  </div>
+</div>`;
+
 const DOUYIN_WEB_BODY = {
   data: {
     word_list: [
@@ -82,6 +90,7 @@ const ROUTES = {
   '/weibo-note-dup': () => ({ type: 'application/json', body: JSON.stringify(WEIBO_NOTE_DUP_BODY) }),
   '/weibo-tenapi': () => ({ type: 'application/json', body: JSON.stringify(WEIBO_TENAPI_BODY) }),
   '/weibo-backup': () => ({ type: 'text/html; charset=utf-8', body: WEIBO_BACKUP_HTML }),
+  '/weibo-topic': () => ({ type: 'text/html; charset=utf-8', body: WEIBO_TOPIC_HTML }),
   '/douyin-web': () => ({ type: 'application/json', body: JSON.stringify(DOUYIN_WEB_BODY) }),
   '/douyin-mobile': () => ({ type: 'application/json', body: JSON.stringify(DOUYIN_MOBILE_BODY) }),
 };
@@ -274,4 +283,36 @@ t('抖音三级兜底全部失败时返回空数组', async () => {
   const topics = await getDouyinHot(5);
 
   assert.deepEqual(topics, []);
+});
+
+// ===== 话题详情抓取（enrich，可选增强） =====
+
+t('话题详情：提取话题页导语作为背景补充', async () => {
+  config.crawler.weiboTopicUrl = `${mock.base}/weibo-topic`;
+  config.crawler.weiboCookie = 'test-cookie';
+
+  const { fetchWeiboTopicDetail } = await import('../src/crawlers/weibo.js');
+  const detail = await fetchWeiboTopicDetail({ title: '某地突发暴雨' });
+
+  assert.ok(detail.includes('救援力量'), '应提取到话题导语');
+});
+
+t('话题详情：无 cookie 时直接返回空串，不发请求', async () => {
+  config.crawler.weiboCookie = '';
+
+  const { fetchWeiboTopicDetail } = await import('../src/crawlers/weibo.js');
+  const detail = await fetchWeiboTopicDetail({ title: '任意话题' });
+
+  assert.equal(detail, '');
+});
+
+t('话题详情：页面结构不匹配时返回空串而不是抛错', async () => {
+  // 热搜页 HTML 没有话题导语结构，抓取应静默降级
+  config.crawler.weiboTopicUrl = `${mock.base}/weibo-backup`;
+  config.crawler.weiboCookie = 'test-cookie';
+
+  const { fetchWeiboTopicDetail } = await import('../src/crawlers/weibo.js');
+  const detail = await fetchWeiboTopicDetail({ title: '任意话题' });
+
+  assert.equal(detail, '');
 });

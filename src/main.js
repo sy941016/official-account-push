@@ -20,6 +20,7 @@
  */
 
 import { realpathSync } from 'fs';
+import { saveArticle } from './articles/store.js';
 import { pathToFileURL } from 'url';
 import config, { validateConfig } from '../config/index.js';
 import logger, { flushLogs } from './utils/logger.js';
@@ -138,6 +139,21 @@ export async function runPipeline(
   );
   const toProcess = newTopics.slice(0, maxTopics);
 
+  // 可选增强：为待处理话题二次抓取详情补充背景（默认关闭，ENRICH_TOPIC_DETAILS=true 开启）。
+  // 每条话题多一次 HTTP 请求，失败静默降级，不阻断流水线。
+  if (config.crawler.enrichTopics) {
+    const { crawlerMap } = await import('./crawlers/index.js');
+    await Promise.all(
+      toProcess.map(async (topic) => {
+        const crawler = crawlerMap.get(topic.source);
+        if (!crawler?.enrich) return;
+        const detail = await crawler.enrich(topic);
+        if (detail) topic.summary = topic.summary ? `${topic.summary}。${detail}` : detail;
+      })
+    );
+    logger.info('话题详情补充完成');
+  }
+
   // 步骤4：逐条处理
   let successCount = 0;
   let publishedCount = 0;
@@ -180,16 +196,17 @@ export async function runPipeline(
 }
 
 // ===== 爬取 =====
+// 平台列表由 crawlers/index.js 注册表驱动，新增平台无需改这里
 async function fetchTopics(sources) {
-  const tasks = [];
-  if (sources.includes('weibo')) {
-    const { getWeiboHot } = await import('./crawlers/weibo.js');
-    tasks.push(getWeiboHot(30).catch((err) => { logger.error(`微博爬取异常: ${err.message}`); return []; }));
-  }
-  if (sources.includes('douyin')) {
-    const { getDouyinHot } = await import('./crawlers/douyin.js');
-    tasks.push(getDouyinHot(20).catch((err) => { logger.error(`抖音爬取异常: ${err.message}`); return []; }));
-  }
+  const { crawlers } = await import('./crawlers/index.js');
+  const tasks = crawlers
+    .filter((c) => sources.includes(c.name))
+    .map((c) =>
+      c.fetch(c.defaultTopN).catch((err) => {
+        logger.error(`${c.name}爬取异常: ${err.message}`);
+        return [];
+      })
+    );
   const results = (await Promise.all(tasks)).flat();
   results.sort((a, b) => (b.viralScore || 0) - (a.viralScore || 0) || (b.hotValue || 0) - (a.hotValue || 0));
   _cachedTopics = results;
@@ -220,6 +237,9 @@ async function processTopic(topic, { dryRun = false } = {}) {
     logger.info(`  ${mark} 人味自检: ${article.humanScore} 分（阈值 ${threshold}）`);
   }
 
+  // 本地存档（dry-run 也存：试运行的文章原来在日志里看完就没了）
+  saveArticle(article, topic, { dryRun });
+
   // 推送草稿
   let draftId = null;
   if (dryRun) {
@@ -231,6 +251,20 @@ async function processTopic(topic, { dryRun = false } = {}) {
       draftId = await publishToDraft(article);
       if (draftId) logger.info(`  ✓ 已进入草稿箱: ${draftId}`);
       else logger.error('  ❌ 草稿推送失败');
+
+      // 可选：人味分达标则跳过人工检查直接发布（默认关闭，见 WECHAT_AUTO_PUBLISH）
+      if (draftId && config.wechat.autoPublish) {
+        const threshold = config.articleStyle?.minHumanScore ?? 70;
+        const scoreOk = typeof article.humanScore !== 'number' || article.humanScore >= threshold;
+        if (scoreOk) {
+          const { publishDraft } = await getPublisher();
+          const publishId = await publishDraft(draftId);
+          if (publishId) logger.info(`  ✓ 已自动发布: ${publishId}`);
+          else logger.error('  ❌ 自动发布失败，草稿已保留，请人工处理');
+        } else {
+          logger.warn(`  ⚠️ 人味分 ${article.humanScore} 低于阈值 ${threshold}，仅入草稿箱，不自动发布`);
+        }
+      }
     } catch (err) {
       logger.error(`  微信推送异常: ${err.message}`);
     }
@@ -278,6 +312,10 @@ async function notifyError(msg, step) {
 }
 
 // ===== 定时任务 =====
+// 流水线重入锁：一轮没跑完时下一轮触发必须跳过，
+// 否则两轮会抓到同一批热点（去重缓存还没写入），重复生成并重复推草稿箱。
+let _pipelineRunning = false;
+
 async function startScheduler(sources, cronExpression, { dryRun = false } = {}) {
   const cron = await getCron();
 
@@ -289,10 +327,19 @@ async function startScheduler(sources, cronExpression, { dryRun = false } = {}) 
 
   const task = cron.schedule(cronExpression, async () => {
     if (_shuttingDown) return;
+    if (_pipelineRunning) {
+      logger.warn('⏰ 定时任务触发，但上一轮流水线仍在执行，本次跳过');
+      return;
+    }
+    _pipelineRunning = true;
     logger.info('⏰ 定时任务触发');
-    await runPipeline(sources, config.run.topicsPerRun, { dryRun }).catch((err) =>
-      logger.error(`定时任务异常: ${err.message}`)
-    );
+    try {
+      await runPipeline(sources, config.run.topicsPerRun, { dryRun });
+    } catch (err) {
+      logger.error(`定时任务异常: ${err.message}`);
+    } finally {
+      _pipelineRunning = false;
+    }
   });
 
   resources.cronTasks.push(task);

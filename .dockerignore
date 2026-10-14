@@ -1,0 +1,12 @@
+node_modules
+src/server/public/dist
+logs
+articles
+.cache
+.git
+.qoder
+.workbuddy-ai
+.env
+.env.*
+*.log
+.DS_Store

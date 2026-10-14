@@ -27,6 +27,9 @@ logs/
 .env.local
 .env.*.local
 
+# 文章本地存档（运行时产物）
+articles/
+
 # AI 助手工作目录（本地记忆/配置，禁止提交）
 .workbuddy-ai/
 .workbuddy/

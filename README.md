@@ -7,8 +7,9 @@
 - **热点采集**：微博热搜、抖音热榜，三级备用策略（官方 API → 第三方接口 → 网页解析），识别爆点并输出跨平台可比的热度分
 - **文章生成**：五种风格（爆款 / 诗意叙事 / 观点犀利 / 治愈温暖 / 干货科普），内置反 AI 检测三层机制（提示词节奏控制 → 后处理 → 自检重写）
 - **自动配图**：按内容关键词从 Unsplash / Pexels 搜图，插入正文并作为封面；所有失败路径静默降级，不阻断发布
-- **多端交互**：Web 聊天界面（React + Vite，支持登录鉴权）、飞书机器人（长连接 / HTTP 回调两种模式）
+- **多端交互**：Web 聊天界面（React + Vite，SSE 流式推送思考步骤，支持登录鉴权）、飞书机器人（长连接 / HTTP 回调两种模式）
 - **定时任务**：按 Cron 表达式自动执行完整流水线，支持试运行（`--dry-run`，无外部副作用）
+- **文章存档**：每篇生成的文章按日期本地存档，Web 端「历史文章」页可随时回看全文
 
 ## 快速开始
 
@@ -42,6 +43,20 @@ npm test               # 单元测试
 | `npm run dry-run` | ❌ | 试运行：完整爬取 + 生成，不推送、不通知、不写去重缓存 |
 
 首次验证链路建议用 `npm run dry-run`；定时任务同样支持试运行：`node src/main.js --mode=scheduler --dry-run`。
+
+## Docker 部署
+
+```bash
+docker build -t official-account-push .
+docker run -d --name oap \
+  --env-file .env \
+  -p 3000:3000 \
+  -v $(pwd)/logs:/app/logs \
+  -v $(pwd)/articles:/app/articles \
+  official-account-push
+```
+
+多阶段构建：前端在构建期编译，运行镜像仅含生产依赖。默认启动与 `npm start` 等价的模式（定时任务 + 飞书长连接 + Web）；挂载 `logs` / `articles` 卷持久化日志与文章存档。
 
 ## 环境变量
 
@@ -77,6 +92,10 @@ npm test               # 单元测试
 | `ARTICLE_TOTAL_BUDGET_MS` | `600000` | 单篇文章总时间预算（覆盖重试 + 重写） |
 | `AI_REQUEST_TIMEOUT_MS` / `AI_MAX_RETRIES` | `180000` / `3` | 单次 AI 请求超时 / 重试次数 |
 | `AGENT_MAX_ITERATIONS` / `AGENT_MEMORY_SIZE` | `10` / `20` | Agent 最大推理轮次；会话消息窗口 |
+| `AGENT_CHAT_TIMEOUT_MS` | `300000` | Web 对话响应总时长上限，超时中止推理 |
+| `AGENT_CHAT_RATE_PER_MINUTE` | `20` | 每个会话每分钟消息数上限（超限返回 429） |
+| `WECHAT_AUTO_PUBLISH` | `false` | 草稿创建后自动发布（仅当人味分达 `ARTICLE_MIN_HUMAN_SCORE`；订阅号每天 1 次额度） |
+| `ENRICH_TOPIC_DETAILS` | `false` | 抓取选中话题详情页导语，作为 AI 写作补充素材 |
 | `AGENT_WEB_PORT` | `3000` | Web 服务端口 |
 | `WEB_LOGIN_USER` / `WEB_LOGIN_PASSWORD` | 空 | 同时配置才启用登录页 |
 | `WEB_SESSION_TTL_HOURS` / `WEB_SESSION_SECRET` | `12` / 空 | 会话有效期；cookie 签名密钥 |
@@ -134,17 +153,19 @@ npm run score -- article.html --json   # JSON 输出
 
 ```
 config/index.js            # 配置聚合 + 启动期校验
+Dockerfile                 # 多阶段构建（前端构建期编译，运行镜像仅生产依赖）
 frontend/                  # 前端工程（React + Vite）
   vite.config.js           # 产物输出到 src/server/public/dist，dev 代理 /api 到 3000
-  src/                     # 入口、页面（Chat/Login）、组件、样式
+  src/                     # 入口、页面（Chat/Login/Articles）、组件、样式
 src/
   agent/                   # ReAct 循环、工具注册表、对话记忆、系统提示词
   server/                  # Web HTTP 服务（鉴权 + API + 伺服前端产物）
   feishu/                  # 飞书消息发送、WebSocket / HTTP 回调接入
-  crawlers/                # 微博 / 抖音热点爬虫
+  crawlers/                # 爬虫注册表（index.js）+ 微博 / 抖音实现
+  articles/store.js        # 文章本地存档（Web 历史文章页数据源）
   ai/                      # 统一 AI 调用层、文章生成、去 AI 味后处理
   images/provider.js       # 图库搜图与下载
-  wechat/publisher.js      # 公众号草稿箱推送
+  wechat/publisher.js      # 公众号草稿箱推送 + 一键发布
   utils/                   # 日志、去重缓存、通用工具
   main.js                  # 主入口（模式分发、流水线、定时任务）
 scripts/score.js           # 人味自检 CLI

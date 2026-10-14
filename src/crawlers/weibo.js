@@ -10,6 +10,7 @@ import axios from 'axios';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
 import { topicId, isAdTopic, computeViralScore, formatHot } from '../utils/cache.js';
+import { truncate } from '../utils/helpers.js';
 
 const BASE_HEADERS = {
   ...config.defaultHeaders,
@@ -220,4 +221,42 @@ function stripHtml(str) {
  */
 function stripLeadingLabels(text) {
   return String(text).replace(/^(\s*【[^】]{1,4}】\s*)+/, '').trim();
+}
+
+/**
+ * 抓取话题详情补充背景（可选增强，仅 ENRICH_TOPIC_DETAILS=true 时被主流程调用）。
+ * 从微博话题搜索页提取话题导语，或退而求其次取第一条热门讨论正文，
+ * 给文章生成提供真实背景素材。
+ *
+ * 微博反爬严格且页面结构不稳定：任何环节失败都返回空串静默降级，绝不阻断流水线。
+ *
+ * @param {Object} topic 标准化话题（至少需要 title）
+ * @returns {Promise<string>} 补充背景文本，无则空串
+ */
+export async function fetchWeiboTopicDetail(topic) {
+  try {
+    // 没有 cookie 时话题页基本必然跳登录，不值得浪费一次请求
+    if (!config.crawler.weiboCookie) return '';
+
+    const cheerio = await import('cheerio');
+    const q = encodeURIComponent(`#${topic.title}#`);
+    const { data: html } = await axios.get(`${config.crawler.weiboTopicUrl}?q=${q}`, {
+      headers: { ...BASE_HEADERS, Cookie: config.crawler.weiboCookie },
+      timeout: TIMEOUT,
+    });
+    const $ = cheerio.load(html);
+
+    // 优先话题导语（话题头部的简介文本）
+    const intro = $('.card-topic .info p, .card-topic .txt').first().text().replace(/\s+/g, ' ').trim();
+    if (intro.length >= 20) return truncate(intro, 200, '…');
+
+    // 兜底：第一条热门讨论正文
+    const first = $('div[node-type="feed_list_content"] .txt, .card-feed .content .txt')
+      .first().text().replace(/\s+/g, ' ').trim();
+    if (first.length >= 20) return truncate(first, 200, '…');
+    return '';
+  } catch (err) {
+    logger.warn(`话题详情抓取失败(${topic.title}): ${err.message}`);
+    return '';
+  }
 }

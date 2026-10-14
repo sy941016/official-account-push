@@ -49,6 +49,9 @@ export const config = {
     appId: process.env.WECHAT_APP_ID || '',
     appSecret: process.env.WECHAT_APP_SECRET || '',
     apiBase: 'https://api.weixin.qq.com',
+    // 开启后草稿创建成功且人味分达标即直接发布（freepublish），跳过人工检查。
+    // 注意发布额度：订阅号每日 1 次 / 服务号每月 4 次。默认关闭。
+    autoPublish: bool(process.env.WECHAT_AUTO_PUBLISH, false),
   },
 
   // 飞书
@@ -85,11 +88,15 @@ export const config = {
     douyinUrl: 'https://www.douyin.com/aweme/v1/web/hot/search/list/',
     douyinMobileUrl: 'https://www.douyin.com/web/api/v2/hotsearch/billboard/word/',
     weiboBackupUrl: 'https://s.weibo.com/top/summary',
+    weiboTopicUrl: 'https://s.weibo.com/weibo', // 话题搜索页（enrich 用，query 参数 q）
     weiboFallbackUrl: 'https://tenapi.cn/v2/weibohot', // 第三方接口备用
     douyinFallbackUrl: 'https://tenapi.cn/v2/douyinhot',
     weiboCookie: process.env.WEIBO_COOKIE || '',
     douyinCookie: process.env.DOUYIN_COOKIE || '',
     requestTimeoutMs: int(process.env.CRAWLER_TIMEOUT_MS, 15_000),
+    // 开启后为待处理话题二次抓取详情（微博话题页导语/热门讨论），补充文章背景素材。
+    // 每条话题多一次 HTTP 请求，拖慢流水线；需要 WEIBO_COOKIE。默认关闭。
+    enrichTopics: bool(process.env.ENRICH_TOPIC_DETAILS, false),
   },
 
   // 运行
@@ -98,6 +105,8 @@ export const config = {
     topicsPerRun: int(process.env.TOPICS_PER_RUN, 3),
     // 两条话题之间的间隔，避免触发平台频控
     topicIntervalMs: num(process.env.TOPIC_INTERVAL_SECONDS, 5) * 1000,
+    // 文章本地存档目录
+    archiveDir: fromRoot(process.env.ARTICLE_ARCHIVE_DIR || 'articles'),
     localServerPort: int(process.env.LOCAL_SERVER_PORT, 8080),
     // HTTP 请求体大小上限（字节），防止内存被撑爆
     maxBodyBytes: int(process.env.MAX_BODY_BYTES, 1_000_000),
@@ -106,6 +115,11 @@ export const config = {
   // Agent 配置
   agent: {
     maxIterations: int(process.env.AGENT_MAX_ITERATIONS, 10), // Agent 最大循环次数
+        // Web 对话的响应总时长上限：超过即中止 ReAct 循环并返回超时提示，
+        // 防止工具连环调用让 HTTP 请求挂几十分钟
+        chatTimeoutMs: int(process.env.AGENT_CHAT_TIMEOUT_MS, 300_000),
+        // 单会话每分钟最多发起的对话消息数，防止已登录用户脚本化烧 token
+        chatRatePerMinute: int(process.env.AGENT_CHAT_RATE_PER_MINUTE, 10),
     memorySize: int(process.env.AGENT_MEMORY_SIZE, 20), // 每个会话保留的消息条数
     webPort: int(process.env.AGENT_WEB_PORT, 3000), // Web 聊天服务端口
     webCorsOrigin: process.env.WEB_CORS_ORIGIN || '*', // Web 允许的跨域来源

@@ -7,8 +7,10 @@
  * - POST /api/login   → 账号密码登录，成功下发签名会话 cookie
  * - POST /api/logout  → 退出登录
  * - GET  /api/me      → 当前登录账号
- * - POST /api/chat    → 与 Agent 对话
+ * - POST /api/chat    → 与 Agent 对话（SSE 流式：thinking 事件实时推送思考步骤，reply/error 收尾）
  * - GET  /api/status  → 系统状态（直接读工具，不再白烧一次 LLM 调用）
+ * - GET  /api/articles → 历史文章列表；GET /api/articles/content?date&id → 单篇正文
+ * - GET  /articles    → 历史文章页 SPA
  * - POST /api/reset   → 清空会话
  * - GET  /health      → 健康检查
  *
@@ -21,7 +23,8 @@ import { join, dirname, extname, normalize, sep } from 'path';
 import { fileURLToPath } from 'url';
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
-import { readBody } from '../utils/helpers.js';
+import { readBody, createRateLimiter } from '../utils/helpers.js';
+import { listArticles, getArticle } from '../articles/store.js';
 import { executeTool } from '../agent/tools.js';
 import {
   isLoginEnabled,
@@ -39,6 +42,27 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 /** Vite 构建产物目录（npm run build:web 输出） */
 const DIST_DIR = join(__dirname, 'public', 'dist');
+
+/**
+ * 同一会话的对话请求串行执行。
+ * 并发的 run() 会交错 append 对话历史（user/assistant/tool 消息乱序），上下文直接坏掉；
+ * 排队保证同一时刻一个会话只有一个 ReAct 循环在写历史。
+ */
+const sessionQueues = new Map();
+
+function enqueueSession(sessionId, task) {
+  const prev = sessionQueues.get(sessionId) || Promise.resolve();
+  const run = prev.then(task, task);
+  sessionQueues.set(sessionId, run);
+  // 队列清空后删除记录，避免 Map 随会话数无界增长
+  run.finally(() => {
+    if (sessionQueues.get(sessionId) === run) sessionQueues.delete(sessionId);
+  }).catch(() => {});
+  return run;
+}
+
+/** /api/chat 会话级限流：单会话每分钟最多 N 条，防脚本化烧 token */
+const checkChatRate = createRateLimiter(config.agent.chatRatePerMinute, 60_000);
 
 /** @type {import('../agent/core.js').default} */
 let _agent = null;
@@ -121,8 +145,8 @@ async function handleRequest(req, res) {
     return json(res, 200, { username: session?.username || '', loginEnabled });
   }
 
-  // SPA 页面（前端按 pathname 决定渲染聊天页还是登录页）
-  if (method === 'GET' && pathname === '/') {
+  // SPA 页面（前端按 pathname 决定渲染聊天页、登录页还是历史文章页）
+  if (method === 'GET' && (pathname === '/' || pathname === '/articles')) {
     return serveSpa(res);
   }
 
@@ -131,7 +155,7 @@ async function handleRequest(req, res) {
     return json(res, 401, { error: 'unauthorized' });
   }
 
-  // API: 对话
+  // API: 对话（SSE 流式：先实时推思考步骤，最后 reply / error 事件收尾）
   if (method === 'POST' && pathname === '/api/chat') {
     let body;
     try {
@@ -147,29 +171,66 @@ async function handleRequest(req, res) {
       return json(res, 400, { error: 'invalid json' });
     }
 
+    const { message, sessionId } = payload;
+    if (!message || typeof message !== 'string') {
+      return json(res, 400, { error: 'message is required' });
+    }
+    if (!_agent) {
+      return json(res, 503, { error: 'Agent not initialized' });
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'Cache-Control': 'no-store',
+      Connection: 'keep-alive',
+      // 反向代理（nginx）默认会缓冲响应，流式推送会被攒成一整段，必须关掉
+      'X-Accel-Buffering': 'no',
+    });
+
+    // 客户端断开后停止写流，避免 write after end
+    let closed = false;
+    res.on('close', () => { closed = true; });
+    const send = (event, data) => {
+      if (closed || res.writableEnded) return;
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    };
+
+    const sid = typeof sessionId === 'string' && sessionId ? sessionId : 'web_default';
+    const rate = checkChatRate(sid);
+    if (!rate.allowed) {
+      res.setHeader('Retry-After', String(rate.retryAfterSec));
+      return json(res, 429, { error: `发送太频繁，请 ${rate.retryAfterSec} 秒后再试` });
+    }
+
+    const timeoutMs = config.agent.chatTimeoutMs;
+
     try {
-      const { message, sessionId } = payload;
-      if (!message || typeof message !== 'string') {
-        return json(res, 400, { error: 'message is required' });
-      }
-      if (!_agent) {
-        return json(res, 503, { error: 'Agent not initialized' });
-      }
-
-      const response = await _agent.run(message, {
-        sessionId: sessionId || 'web_default',
-        platform: 'web',
+      const response = await enqueueSession(sid, () => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        timer.unref?.();
+        return _agent
+          .run(message, {
+            sessionId: sid,
+            platform: 'web',
+            signal: controller.signal,
+            onThinking: (step) => send('thinking', step),
+          })
+          .finally(() => clearTimeout(timer));
       });
 
-      return json(res, 200, {
-        reply: response.reply,
-        thinkingSteps: response.thinkingSteps,
-        iterations: response.iterations,
-      });
+      if (response.aborted) {
+        send('error', {
+          error: `等待超过 ${Math.round(timeoutMs / 60000)} 分钟，已中止。请换个更简单的问题或稍后再试。`,
+        });
+      } else {
+        send('reply', { reply: response.reply, iterations: response.iterations });
+      }
     } catch (err) {
       logger.error(`Web chat error: ${err.message}`);
-      return json(res, 500, { error: err.message });
+      send('error', { error: err.message });
     }
+    return res.end();
   }
 
   // API: 系统状态（直接调用工具，省掉一次 LLM 往返）
@@ -180,6 +241,19 @@ async function handleRequest(req, res) {
     } catch (err) {
       return json(res, 500, { error: err.message });
     }
+  }
+
+  // API: 历史文章列表 / 单篇正文（本地存档，见 src/articles/store.js）
+  if (method === 'GET' && pathname === '/api/articles') {
+    const limit = Math.min(parseInt(url.searchParams.get('limit') || '50', 10) || 50, 200);
+    const offset = Math.max(parseInt(url.searchParams.get('offset') || '0', 10) || 0, 0);
+    return json(res, 200, listArticles({ limit, offset }));
+  }
+
+  if (method === 'GET' && pathname === '/api/articles/content') {
+    const item = getArticle(url.searchParams.get('date') || '', url.searchParams.get('id') || '');
+    if (!item) return json(res, 404, { error: 'not found' });
+    return json(res, 200, item);
   }
 
   // API: 清空会话

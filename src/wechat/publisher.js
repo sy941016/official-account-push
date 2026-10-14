@@ -300,6 +300,37 @@ async function prepareImages(article) {
   return { contentUrls, coverMediaId, images };
 }
 
+// ===== 直接发布 =====
+/**
+ * 把草稿箱文章直接发布出去（freepublish/submit）。
+ * 仅 WECHAT_AUTO_PUBLISH=true 且人味分达标时由主流程调用——
+ * 跳过人工检查直接推送，发布额度有限（订阅号每日 1 次 / 服务号每月 4 次）。
+ * @param {string} draftId 草稿 media_id
+ * @returns {Promise<string|null>} publish_id，失败返回 null
+ */
+export async function publishDraft(draftId) {
+  const token = await getAccessToken();
+  if (!token) return null;
+
+  try {
+    const { data } = await axios.post(
+      `${apiBase()}/cgi-bin/freepublish/submit`,
+      { media_id: draftId },
+      {
+        params: { access_token: token },
+        headers: { 'Content-Type': 'application/json; charset=UTF-8' },
+        timeout: 15_000,
+      }
+    );
+    if (data?.publish_id) return data.publish_id;
+    logger.error(`自动发布失败: ${JSON.stringify(data)}`);
+    return null;
+  } catch (err) {
+    logger.error(`自动发布异常: ${err.message}`);
+    return null;
+  }
+}
+
 // ===== 完整发布流程 =====
 /**
  * @param {object} article  { title, contentHtml, digest, imageQuery?, keywords? }

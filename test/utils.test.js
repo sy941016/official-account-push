@@ -7,7 +7,7 @@ import {
   formatHot,
   getLabelMultiplier,
 } from '../src/utils/cache.js';
-import { dedupeBy, truncate, isRetryableError, withRetry, localDateKey, createDedupeCache, sleep, insertImages } from '../src/utils/helpers.js';
+import { dedupeBy, truncate, isRetryableError, withRetry, localDateKey, createDedupeCache, sleep, insertImages, createRateLimiter } from '../src/utils/helpers.js';
 import { toClaudeMessages } from '../src/ai/client.js';
 
 test('topicId 对同一标题稳定，不同标题不同', () => {
@@ -264,5 +264,19 @@ test('insertImages 对图片 URL 里的引号做转义，避免破坏标签', ()
   const out = insertImages('<p>1</p><p>2</p>', ['http://x/a"onerror="alert(1)']);
   assert.ok(!out.includes('"onerror="'), '引号应被转义，不能注入属性');
   assert.ok(out.includes('&quot;'));
+});
+
+test('createRateLimiter 窗口内超限拒绝并给出重试秒数，不同 key 互不影响', () => {
+  const check = createRateLimiter(3, 60_000);
+
+  assert.equal(check('s1').allowed, true);
+  assert.equal(check('s1').allowed, true);
+  assert.equal(check('s1').allowed, true);
+
+  const denied = check('s1');
+  assert.equal(denied.allowed, false, '第 4 次应被拒绝');
+  assert.ok(denied.retryAfterSec >= 1 && denied.retryAfterSec <= 60, `重试秒数应在窗口内，实际: ${denied.retryAfterSec}`);
+
+  assert.equal(check('s2').allowed, true, '另一个会话不应被牵连');
 });
 

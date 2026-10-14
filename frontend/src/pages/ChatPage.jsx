@@ -102,8 +102,29 @@ export default function ChatPage() {
     setIsLoading(true);
     pushItem({ kind: 'msg', role: 'user', text });
 
+    // 流式思考步骤：收到首个事件时才创建卡片，模型直接回复（无工具调用）时不留空卡片
+    const steps = [];
+    let stepsCardVisible = false;
+    const renderSteps = () => {
+      const snapshot = [...steps];
+      setItems((prev) => {
+        if (!stepsCardVisible) {
+          stepsCardVisible = true;
+          return [...prev, { kind: 'steps', steps: snapshot }];
+        }
+        const next = [...prev];
+        next[next.length - 1] = { kind: 'steps', steps: snapshot };
+        return next;
+      });
+    };
+
     try {
-      const { res, data } = await api.chat(text, sessionIdRef.current);
+      const { res, data } = await api.chatStream(text, sessionIdRef.current, {
+        onThinking: (step) => {
+          steps.push(step);
+          renderSteps();
+        },
+      });
 
       if (!res.ok) {
         // 会话过期:服务端会在响应体里带 loginRequired，直接送回登录页
@@ -119,8 +140,8 @@ export default function ChatPage() {
         return;
       }
 
-      if (data.thinkingSteps?.length) pushItem({ kind: 'steps', steps: data.thinkingSteps });
-      if (data.reply) pushItem({ kind: 'msg', role: 'agent', text: data.reply });
+      if (data?.error) pushItem({ kind: 'notice', text: '出错了：' + data.error });
+      else if (data?.reply) pushItem({ kind: 'msg', role: 'agent', text: data.reply });
     } catch (err) {
       pushItem({ kind: 'notice', text: '网络错误：' + err.message });
     } finally {

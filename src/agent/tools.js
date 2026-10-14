@@ -6,10 +6,9 @@
 
 import config from '../../config/index.js';
 import logger from '../utils/logger.js';
+import { crawlers } from '../crawlers/index.js';
 
 // ===== 工具内部引用（延迟导入避免循环依赖）=====
-let _weiboCrawler = null;
-let _douyinCrawler = null;
 let _generator = null;
 let _publisher = null;
 let _feishuApp = null;
@@ -38,80 +37,43 @@ export function initToolContext(context) {
 
 // ===== 工具定义 =====
 
-const toolDefinitions = [
-  {
-    name: 'crawl_weibo',
-    description: '爬取微博热搜榜，返回当前最热门的话题列表（含排名、热度值、爆点标签如爆/沸/热/新）',
-    parameters: {
-      type: 'object',
-      properties: {
-        topN: {
-          type: 'number',
-          description: '获取前N条热搜，默认30',
-        },
+// 爬虫工具由注册表驱动：crawlers/index.js 新增平台后，此处自动出现 crawl_<name> 工具
+const crawlTools = crawlers.map((c) => ({
+  name: `crawl_${c.name}`,
+  description: `爬取${c.description}`,
+  parameters: {
+    type: 'object',
+    properties: {
+      topN: {
+        type: 'number',
+        description: `获取前N条，默认${c.defaultTopN}`,
       },
-      required: [],
     },
-    execute: async ({ topN = 30 } = {}) => {
-      if (!_weiboCrawler) {
-        const mod = await import('../crawlers/weibo.js');
-        _weiboCrawler = mod.getWeiboHot;
-      }
-      const topics = await _weiboCrawler(clampTopN(topN, 30, 50));
-      // 更新缓存
-      _context.cachedTopics = [
-        ..._context.cachedTopics.filter(t => t.source !== 'weibo'),
-        ...topics,
-      ];
-      // 返回精简格式给 Agent
-      return topics.map(t => ({
-        id: t.id,
-        title: t.title,
-        rank: t.rank,
-        hotValue: t.hotValue,
-        viralScore: t.viralScore,
-        viralLabel: t.viralLabel,
-        summary: t.summary,
-        source: 'weibo',
-      }));
-    },
+    required: [],
   },
+  execute: async ({ topN } = {}) => {
+    const topics = await c.fetch(clampTopN(topN, c.defaultTopN, 50));
+    // 更新缓存
+    _context.cachedTopics = [
+      ..._context.cachedTopics.filter((t) => t.source !== c.name),
+      ...topics,
+    ];
+    // 返回精简格式给 Agent
+    return topics.map((t) => ({
+      id: t.id,
+      title: t.title,
+      rank: t.rank,
+      hotValue: t.hotValue,
+      viralScore: t.viralScore,
+      viralLabel: t.viralLabel,
+      summary: t.summary,
+      source: c.name,
+    }));
+  },
+}));
 
-  {
-    name: 'crawl_douyin',
-    description: '爬取抖音热点榜，返回当前最热门的话题列表（含排名、热度值、爆点标签）',
-    parameters: {
-      type: 'object',
-      properties: {
-        topN: {
-          type: 'number',
-          description: '获取前N条热点，默认20',
-        },
-      },
-      required: [],
-    },
-    execute: async ({ topN = 20 } = {}) => {
-      if (!_douyinCrawler) {
-        const mod = await import('../crawlers/douyin.js');
-        _douyinCrawler = mod.getDouyinHot;
-      }
-      const topics = await _douyinCrawler(clampTopN(topN, 20, 50));
-      _context.cachedTopics = [
-        ..._context.cachedTopics.filter(t => t.source !== 'douyin'),
-        ...topics,
-      ];
-      return topics.map(t => ({
-        id: t.id,
-        title: t.title,
-        rank: t.rank,
-        hotValue: t.hotValue,
-        viralScore: t.viralScore,
-        viralLabel: t.viralLabel,
-        summary: t.summary,
-        source: 'douyin',
-      }));
-    },
-  },
+const toolDefinitions = [
+  ...crawlTools,
 
   {
     name: 'generate_article',

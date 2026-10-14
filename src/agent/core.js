@@ -50,11 +50,11 @@ class Agent {
   /**
    * 执行 Agent（核心方法）
    * @param {string} userMessage 用户消息
-   * @param {Object} options - { sessionId, platform, onThinking }
-   * @returns {Promise<{reply: string, thinkingSteps: Array, iterations: number}>}
+   * @param {Object} options - { sessionId, platform, onThinking, signal }
+   * @returns {Promise<{reply: string, thinkingSteps: Array, iterations: number, aborted: boolean}>}
    */
   async run(userMessage, options = {}) {
-    const { sessionId = 'default', platform = 'web', onThinking = null } = options;
+    const { sessionId = 'default', platform = 'web', onThinking = null, signal = null } = options;
 
     if (!this._initialized) this.init();
 
@@ -65,6 +65,13 @@ class Agent {
     let iterations = 0;
 
     while (iterations < this.maxIterations) {
+      // 中止信号只在每轮开始前检查，不打断正在执行的工具批次：
+      // 一批 tool_calls 必须把 tool_result 写全，否则历史里留下没有结果的
+      // tool_calls，下一轮请求会被模型接口直接拒绝（400）。
+      if (signal?.aborted) {
+        finalReply = '抱歉，等待响应超时，请换个更简单的问题或稍后再试。';
+        break;
+      }
       iterations++;
 
       let llmResponse;
@@ -73,7 +80,9 @@ class Agent {
       } catch (err) {
         logger.error(`LLM 调用失败: ${err.message}`);
         finalReply = `抱歉，调用 AI 服务失败：${err.message}`;
-        this.memory.append(sessionId, { role: 'assistant', content: finalReply });
+        // 失败回复不写入会话历史：这是瞬时故障而非对话内容，写进去会污染后续轮次
+        // （模型会在历史里看到这句话并可能模仿）。用户消息留在历史末尾，
+        // 下一条消息进来时模型会自然接上。
         break;
       }
 
@@ -139,7 +148,7 @@ class Agent {
       this.memory.append(sessionId, { role: 'assistant', content: finalReply });
     }
 
-    return { reply: finalReply, thinkingSteps, iterations };
+    return { reply: finalReply, thinkingSteps, iterations, aborted: Boolean(signal?.aborted) };
   }
 
   /**

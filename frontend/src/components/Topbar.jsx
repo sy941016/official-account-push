@@ -22,6 +22,7 @@ export default function Topbar({ conn, user, onReset, onLogout }) {
           <span className="avatar" aria-hidden="true">{user ? user.slice(0, 1) : ''}</span>
           <span id="userName">{user}</span>
         </span>
+        <a className="btn" href="/articles"><span className="wide-only">历史文章</span><span className="narrow-only">历史</span></a>
         <button className="btn" onClick={onReset}><span className="wide-only">清空会话</span><span className="narrow-only">清空</span></button>
         <button className="btn" onClick={onLogout} hidden={!user}><span className="wide-only">退出登录</span><span className="narrow-only">退出</span></button>
       </div>
